@@ -1,8 +1,9 @@
 const std = @import("std");
 
-pub const ParserErrorType = enum {
+pub const ParserErrorType = error{
     TokenizerError, // only for dev purposes
     MissingSemiColon,
+    EOFError,
 };
 
 pub const Error = struct {

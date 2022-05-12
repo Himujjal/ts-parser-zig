@@ -12,8 +12,8 @@ pub const ParserErrorType = parser.ParserErrorType;
 
 pub fn parseText(allocator: Allocator, text: []const u8, options: ParserOptions) Parser {
     var _parser = Parser.init(allocator, options);
-    var p = Parser.parse(&_parser, text);
-    return p.*;
+    _ = (&_parser).parse(text);
+    return _parser;
 }
 
 test "Parse Test" {
