@@ -4,6 +4,48 @@ const Allocator = std.mem.Allocator;
 
 pub const DigitType = enum { Digit, Hex, Binary, Octal };
 
+pub const ContextualKeyword = enum {
+    NONE,
+    _abstract,
+    _accessor,
+    _as,
+    _assert,
+    _asserts,
+    _async,
+    _await,
+    _checks,
+    _constructor,
+    _declare,
+    _enum,
+    _exports,
+    _from,
+    _get,
+    _global,
+    _implements,
+    _infer,
+    _interface,
+    _is,
+    _keyof,
+    _mixins,
+    _module,
+    _namespace,
+    _of,
+    _opaque,
+    _out,
+    _override,
+    _private,
+    _protected,
+    _proto,
+    _public,
+    _readonly,
+    _require,
+    _set,
+    _static,
+    _symbol,
+    _type,
+    _unique,
+};
+
 /// Basically an enum of all Possible Token Types
 /// Referred from https://github.com/antlr/grammars-v4/blob/master/javascript/typescript/TypeScriptLexer.g4
 pub const TokenType = enum {
@@ -179,6 +221,17 @@ pub const TokenType = enum {
     EOF, // "EOF"
 };
 
+pub const CodeLocation = struct {
+    /// Index of the start of the token in the array
+    start: usize = 0,
+
+    /// end of the token in the string stream
+    end: usize = 0,
+
+    start_line: usize = 0,
+    start_col: usize = 0,
+};
+
 pub const Token = struct {
     const Self = @This();
 
@@ -189,6 +242,11 @@ pub const Token = struct {
 
     /// end of the token in the string stream
     end: usize = 0,
+
+    start_line: usize = 0,
+    start_col: usize = 0,
+
+    value: []const u8 = undefined,
 
     pub fn toString(
         self: *const @This(),
@@ -208,8 +266,8 @@ pub const Token = struct {
         return res;
     }
 
-    pub fn getCodePartOfToken(self: *Self, code: []const u8) []const u8 {
-        return code[self.start..self.end];
+    pub fn getCodePartOfToken(self: *Self) []const u8 {
+        return self.value;
     }
 
     pub fn testing(self: *Self, allocator: Allocator) void {

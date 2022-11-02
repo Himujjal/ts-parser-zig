@@ -17,19 +17,6 @@ pub fn parseText(allocator: Allocator, text: []const u8, options: ParserOptions)
 }
 
 test "Parse Test" {
-    const str: []const u8 = "1 + 1 = 2;";
-    var allocator = std.testing.allocator;
-    var p = parseText(allocator, str, .{});
-
-    const out = p.tree.toString();
-
-    try expect(
-        std.mem.eql(u8, out,
-            \\Div
-            \\  Children
-            \\      Text
-            \\          Hello Svelte
-        ),
-    );
-    p.deinit();
+    _ = @import("./scanner_test.zig");
+    _ = @import("./parser_test.zig");
 }
