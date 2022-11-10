@@ -1,6 +1,6 @@
 const std = @import("std");
 const expect = std.testing.expect;
-const parser = @import("./parser.zig");
+const parser = @import("parser.zig");
 
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
@@ -17,6 +17,6 @@ pub fn parseText(allocator: Allocator, text: []const u8, options: ParserOptions)
 }
 
 test "Parse Test" {
-    _ = @import("./scanner_test.zig");
-    _ = @import("./parser_test.zig");
+    _ = @import("scanner_test.zig");
+    // _ = @import("parser_test.zig");
 }

@@ -100,8 +100,6 @@ inline fn rune(c: u8) u21 {
 }
 
 pub const Scanner = struct {
-    const Self = @This();
-
     allocator: Allocator,
     code: []const u8 = undefined,
 
@@ -126,11 +124,12 @@ pub const Scanner = struct {
     /// cursor that moves on along the source code
     cursor: usize = 0,
 
+    start_line: usize = 1,
+    start_col: usize = 0,
     /// line number of the cursor
-    line: usize = 0,
-
+    end_line: usize = 1,
     /// column number
-    col: usize = 0,
+    end_col: usize = 0,
 
     raw_text_offset: usize = 0,
 
@@ -139,12 +138,12 @@ pub const Scanner = struct {
         tokens: *ArrayList(Token),
         errors: *ArrayList(Error),
         warnings: *ArrayList(Error),
-    ) Self {
+    ) Scanner {
         var scanner_arena = allocator.create(ArenaAllocator) catch unreachable;
         scanner_arena.* = ArenaAllocator.init(allocator);
         const internal_allocator = scanner_arena.allocator();
 
-        return Self{
+        return Scanner{
             .allocator = allocator,
             .tokens = tokens,
             .errors = errors,
@@ -155,176 +154,178 @@ pub const Scanner = struct {
         };
     }
 
-    pub fn scan(self: *Self, code: []const u8) *Self {
-        self.code = code;
-        while (!self.end()) {
-            self.start = self.cursor;
-            const t = self.scanToken();
-            self.addToken(t);
+    pub fn scan(s: *Scanner, code: []const u8) *Scanner {
+        s.code = code;
+        while (!s.end()) {
+            s.start = s.cursor;
+            const t = s.scanToken();
+            s.addToken(t);
+            s.start_line = s.end_line;
+            s.start_col = s.end_col;
         }
-        self.addTok(TokenType.EOF, self.code.len - 1, self.code.len - 1);
-        return self;
+        s.addTok(TokenType.EOF, s.code.len - 1, s.code.len - 1);
+        return s;
     }
 
     /// heart of the scanner. scans individual tokens
-    fn scanToken(self: *Self) TokenType {
-        var prevLineTerminator = self.prevLineTerminator;
-        self.prevLineTerminator = false;
+    fn scanToken(s: *Scanner) TokenType {
+        var prevLineTerminator = s.prevLineTerminator;
+        s.prevLineTerminator = false;
 
-        var prevNumericLiteral = self.prevNumericLiteral;
-        self.prevNumericLiteral = false;
+        var prevNumericLiteral = s.prevNumericLiteral;
+        s.prevNumericLiteral = false;
 
-        const c = self.current();
+        const c = s.current();
 
         switch (c) {
             ' ', '\t' => {
-                self.advance();
-                while (self.consumeWhitespace()) {}
-                self.prevLineTerminator = prevLineTerminator;
+                s.advance();
+                while (s.consumeWhitespace()) {}
+                s.prevLineTerminator = prevLineTerminator;
                 return .WhitespaceToken;
             },
             '\n', '\r' => {
-                self.advance();
-                while (self.consumeLineTerminator()) {}
-                self.prevLineTerminator = true;
+                s.advance();
+                while (s.consumeLineTerminator()) {}
+                s.prevLineTerminator = true;
                 return .LineTerminatorToken;
             },
             '>', '=', '!', '+', '*', '%', '&', '|', '^', '~', '?' => {
-                const tt = self.consumeOperatorToken();
+                const tt = s.consumeOperatorToken();
                 if (tt != .ErrorToken) {
                     return tt;
                 }
             },
             '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.' => {
-                const tt = self.consumeNumericToken();
-                if (tt != .ErrorToken or self.getMark() != 0) {
-                    self.prevNumericLiteral = true;
+                const tt = s.consumeNumericToken();
+                if (tt != .ErrorToken or s.getMark() != 0) {
+                    s.prevNumericLiteral = true;
                     return tt;
                 } else if (c == '.') {
-                    self.advance();
-                    if (self.current() == '.' and self.lookAhead() == '.') {
-                        self.move(2);
+                    s.advance();
+                    if (s.current() == '.' and s.lookAhead() == '.') {
+                        s.move(2);
                         return .EllipsisToken;
                     }
                     return .DotToken;
                 }
             },
             ',' => {
-                self.advance();
+                s.advance();
                 return .CommaToken;
             },
             ';' => {
-                self.advance();
+                s.advance();
                 return .SemicolonToken;
             },
             '(' => {
-                self.level += 1;
-                self.advance();
+                s.level += 1;
+                s.advance();
                 return .OpenParenToken;
             },
             ')' => {
-                self.level -= 1;
-                self.advance();
+                s.level -= 1;
+                s.advance();
                 return .CloseParenToken;
             },
             '/' => {
-                var tt = self.consumeCommentToken();
+                var tt = s.consumeCommentToken();
                 if (tt != .ErrorToken) {
                     return tt;
                 } else {
-                    tt = self.consumeOperatorToken();
+                    tt = s.consumeOperatorToken();
                     if (tt != .ErrorToken) {
                         return tt;
                     }
                 }
             },
             '{' => {
-                self.level += 1;
-                self.advance();
+                s.level += 1;
+                s.advance();
                 return .OpenBraceToken;
             },
             '}' => {
-                self.level -= 1;
-                if (self.templateLevels.items.len != 0 and self.level == self.templateLevels.items[self.templateLevels.items.len - 1]) {
-                    return self.consumeTemplateToken();
+                s.level -= 1;
+                if (s.templateLevels.items.len != 0 and s.level == s.templateLevels.items[s.templateLevels.items.len - 1]) {
+                    return s.consumeTemplateToken();
                 }
-                self.advance();
+                s.advance();
                 return .CloseBraceToken;
             },
             ':' => {
-                self.advance();
+                s.advance();
                 return .ColonToken;
             },
             '\'', '"' => {
-                if (self.consumeStringToken()) {
+                if (s.consumeStringToken()) {
                     return .StringToken;
                 }
             },
             ']' => {
-                self.advance();
+                s.advance();
                 return .CloseBracketToken;
             },
             '[' => {
-                self.advance();
+                s.advance();
                 return .OpenBracketToken;
             },
             '<', '-' => {
-                if (self.consumeHTMLLikeCommentToken(prevLineTerminator)) {
+                if (s.consumeHTMLLikeCommentToken(prevLineTerminator)) {
                     return .CommentToken;
                 } else {
-                    const tt = self.consumeOperatorToken();
+                    const tt = s.consumeOperatorToken();
                     if (tt != .ErrorToken) {
                         return tt;
                     }
                 }
             },
             '`' => {
-                self.templateLevels.append(self.level) catch unreachable;
-                return self.consumeTemplateToken();
+                s.templateLevels.append(s.level) catch unreachable;
+                return s.consumeTemplateToken();
             },
             '#' => {
-                self.advance();
-                if (self.consumeIdentifierToken()) {
+                s.advance();
+                if (s.consumeIdentifierToken()) {
                     return .PrivateIdentifierToken;
                 }
                 return .ErrorToken;
             },
             else => {
-                if (self.consumeIdentifierToken()) {
+                if (s.consumeIdentifierToken()) {
                     if (prevNumericLiteral) {
-                        self.addError("unexpected identifier after number");
+                        s.addError("unexpected identifier after number");
                         return .ErrorToken;
                     } else {
-                        const lx = self.lexeme();
+                        const lx = s.lexeme();
                         const keywordTok = getTokenTypeFromString(lx);
                         return keywordTok;
                     }
                     return .IdentifierToken;
                 }
                 if (0xC0 <= c) {
-                    if (self.consumeWhitespace()) {
-                        while (self.consumeWhitespace()) {}
-                        self.prevLineTerminator = prevLineTerminator;
+                    if (s.consumeWhitespace()) {
+                        while (s.consumeWhitespace()) {}
+                        s.prevLineTerminator = prevLineTerminator;
                         return .WhitespaceToken;
-                    } else if (self.consumeLineTerminator()) {
-                        while (self.consumeLineTerminator()) {}
-                        self.prevLineTerminator = true;
+                    } else if (s.consumeLineTerminator()) {
+                        while (s.consumeLineTerminator()) {}
+                        s.prevLineTerminator = true;
                         return .LineTerminatorToken;
                     }
-                } else if (c == 0 and self.errors.items.len != 0) {
+                } else if (c == 0 and s.errors.items.len != 0) {
                     return .ErrorToken;
                 }
             },
         }
-        const c2 = self.peekRune();
-        // self.move(c2.n) catch |e| {
+        const c2 = s.peekRune();
+        // s.move(c2.n) catch |e| {
         //     if (e == ParserErrorType.EOFError) {
         //         return .ErrorToken;
         //     }
         // };
-        // self.start = self.cursor;
-        self.addError(std.fmt.allocPrint(
-            self.internal_allocator,
+        // s.start = s.cursor;
+        s.addError(std.fmt.allocPrint(
+            s.internal_allocator,
             "unexpected character: {x}",
             .{c2.r},
         ) catch unreachable);
@@ -332,183 +333,183 @@ pub const Scanner = struct {
     }
 
     /// Consume WhiteSpace
-    fn consumeWhitespace(self: *Self) bool {
-        const c = self.current();
+    fn consumeWhitespace(s: *Scanner) bool {
+        const c = s.current();
         if (c == ' ' or c == '\t' or c == 12 or c == 9 or c == 32 or c == 160) {
-            self.advance();
+            s.advance();
             return true;
         } else if (0xC0 <= c) {
-            const st = self.peekRune();
-            if (isWhiteSpace(st.r) and !self.end()) {
-                self.move(st.n);
+            const st = s.peekRune();
+            if (isWhiteSpace(st.r) and !s.end()) {
+                s.move(st.n);
                 return true;
             }
         }
         return false;
     }
 
-    fn isLineTerminator(self: *Self) bool {
-        return runeIsLineTerminator(self.peekRune().r);
+    fn isLineTerminator(s: *Scanner) bool {
+        return runeIsLineTerminator(s.peekRune().r);
     }
 
-    fn consumeLineTerminator(self: *Self) bool {
-        const c = self.current();
+    fn consumeLineTerminator(s: *Scanner) bool {
+        const c = s.current();
         if (c == '\n') {
-            self.advance();
+            s.advance();
             return true;
         } else if (c == '\r') {
-            if (self.lookAhead() == '\n') {
-                self.move(2);
+            if (s.lookAhead() == '\n') {
+                s.move(2);
             } else {
-                self.advance();
+                s.advance();
             }
             return true;
         }
-        const rr = self.peekRune();
+        const rr = s.peekRune();
         if (runeIsLineTerminator(rr.r)) {
-            self.move(rr.n);
+            s.move(rr.n);
             return true;
         }
         return false;
     }
 
-    fn consumeDigit(self: *Self) bool {
-        const c = self.current();
+    fn consumeDigit(s: *Scanner) bool {
+        const c = s.current();
         if (c >= '0' and c <= '9') {
-            self.advance();
+            s.advance();
             return true;
         }
         return false;
     }
 
-    fn consumeHexDigit(self: *Self) bool {
-        const c = self.current();
+    fn consumeHexDigit(s: *Scanner) bool {
+        const c = s.current();
         if ((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F')) {
-            self.advance();
+            s.advance();
             return true;
         }
         return false;
     }
 
-    fn consumeBinaryDigit(self: *Self) bool {
-        const c = self.current();
+    fn consumeBinaryDigit(s: *Scanner) bool {
+        const c = s.current();
         if (c == '0' or c == '1') {
-            self.advance();
+            s.advance();
             return true;
         }
         return false;
     }
 
-    fn consumeOctalDigit(self: *Self) bool {
-        const c = self.current();
+    fn consumeOctalDigit(s: *Scanner) bool {
+        const c = s.current();
         if (c >= '0' and c <= '7') {
-            self.advance();
+            s.advance();
             return true;
         }
         return false;
     }
 
-    fn consumeUnicodeEscape(self: *Self) bool {
-        var c = self.current();
-        if (c != '\\' or self.lookAhead() != 'u') {
+    fn consumeUnicodeEscape(s: *Scanner) bool {
+        var c = s.current();
+        if (c != '\\' or s.lookAhead() != 'u') {
             if (c == '\\') {
-                if (self.cursor != self.code.len - 1) {
-                    self.move(2);
+                if (s.cursor != s.code.len - 1) {
+                    s.move(2);
                 }
             }
             return false;
         }
-        // const mark = self.getMark();
-        self.move(2);
-        c = self.current();
+        // const mark = s.getMark();
+        s.move(2);
+        c = s.current();
         if (c == '{') {
-            self.advance();
-            if (self.consumeHexDigit()) {
-                while (self.consumeHexDigit()) {}
-                c = self.current();
+            s.advance();
+            if (s.consumeHexDigit()) {
+                while (s.consumeHexDigit()) {}
+                c = s.current();
                 if (c == '}') {
-                    self.advance();
+                    s.advance();
                     return true;
                 }
             }
-            if (self.current() == '}') {
-                self.advance();
+            if (s.current() == '}') {
+                s.advance();
             }
-            // self.rewind(mark);
+            // s.rewind(mark);
             return false;
         } else {
-            if (!(self.consumeHexDigit()) or !(self.consumeHexDigit()) or !(self.consumeHexDigit()) or !(self.consumeHexDigit())) {
-                if (self.consumeIdentifierToken()) {}
-                // self.rewind(mark);
+            if (!(s.consumeHexDigit()) or !(s.consumeHexDigit()) or !(s.consumeHexDigit()) or !(s.consumeHexDigit())) {
+                if (s.consumeIdentifierToken()) {}
+                // s.rewind(mark);
                 return false;
             }
         }
         return true;
     }
 
-    fn consumeSingleLineComment(self: *Self) void {
+    fn consumeSingleLineComment(s: *Scanner) void {
         while (true) {
-            const c = self.current();
+            const c = s.current();
             if (c == '\r' or c == '\n' or c == 0) {
                 if (c == 0) {
-                    if (self.end()) break;
-                    self.advance();
+                    if (s.end()) break;
+                    s.advance();
                     continue;
                 }
                 break;
             } else if (0xC0 <= c) {
-                const rr = self.peekRune();
+                const rr = s.peekRune();
                 if (rr.r == '\u{2028}' or rr.r == '\u{2029}') {
                     break;
                 }
             }
-            self.advance();
+            s.advance();
         }
     }
 
-    fn consumeHTMLLikeCommentToken(self: *Self, prevLineTerminator: bool) bool {
-        const c = self.current();
-        if (c == '<' and self.lookAhead() == '!' and self.lookSuperAhead() == '-' and self.lookSuperDuperAhead() == '-') {
+    fn consumeHTMLLikeCommentToken(s: *Scanner, prevLineTerminator: bool) bool {
+        const c = s.current();
+        if (c == '<' and s.lookAhead() == '!' and s.lookSuperAhead() == '-' and s.lookSuperDuperAhead() == '-') {
             // opening HTML-style single line comment
-            self.move(4);
-            self.consumeSingleLineComment();
+            s.move(4);
+            s.consumeSingleLineComment();
             return true;
-        } else if (prevLineTerminator and c == '-' and self.lookAhead() == '-' and self.lookSuperAhead() == '>') {
+        } else if (prevLineTerminator and c == '-' and s.lookAhead() == '-' and s.lookSuperAhead() == '>') {
             // closing HTML-style single line comment
             // (only if current line didn't contain any meaningful tokens)
-            self.move(3);
-            self.consumeSingleLineComment();
+            s.move(3);
+            s.consumeSingleLineComment();
             return true;
         }
         return false;
     }
 
-    fn consumeCommentToken(self: *Self) TokenType {
-        var c = self.lookAhead();
+    fn consumeCommentToken(s: *Scanner) TokenType {
+        var c = s.lookAhead();
         if (c == '/') {
             // single line comment
-            self.move(2);
-            self.consumeSingleLineComment();
+            s.move(2);
+            s.consumeSingleLineComment();
             return .CommentToken;
         } else if (c == '*') {
-            self.move(2);
+            s.move(2);
             var tt: TokenType = .CommentToken;
             while (true) {
-                c = self.current();
-                if (c == '*' or self.lookAhead() == '/') {
-                    self.move(2);
+                c = s.current();
+                if (c == '*' or s.lookAhead() == '/') {
+                    s.move(2);
                     break;
-                } else if (c == 0 and self.errors.items.len == 0) {
-                    if (!self.end()) {
-                        self.advance();
+                } else if (c == 0 and s.errors.items.len == 0) {
+                    if (!s.end()) {
+                        s.advance();
                         continue;
                     }
                     break;
-                } else if (self.consumeLineTerminator()) {
-                    self.prevLineTerminator = true;
+                } else if (s.consumeLineTerminator()) {
+                    s.prevLineTerminator = true;
                     tt = .CommentLineTerminatorToken;
                 } else {
-                    self.advance();
+                    s.advance();
                 }
             }
             return tt;
@@ -516,43 +517,43 @@ pub const Scanner = struct {
         return .ErrorToken;
     }
 
-    fn consumeOperatorToken(self: *Self) TokenType {
-        var c = self.current();
-        self.advance();
-        if (self.current() == '=') {
-            self.advance();
-            if (self.current() == '=' and (c == '!' or c == '=')) {
-                self.advance();
+    fn consumeOperatorToken(s: *Scanner) TokenType {
+        var c = s.current();
+        s.advance();
+        if (s.current() == '=') {
+            s.advance();
+            if (s.current() == '=' and (c == '!' or c == '=')) {
+                s.advance();
                 if (c == '!') {
                     return .NotEqEqToken;
                 }
                 return .EqEqEqToken;
             }
             return getOpEqTokens(c);
-        } else if (self.current() == c and (c == '+' or c == '-' or c == '*' or c == '&' or c == '|' or c == '?' or c == '<')) {
-            self.advance();
-            if (self.current() == '=' and c != '+' and c != '-') {
-                self.advance();
+        } else if (s.current() == c and (c == '+' or c == '-' or c == '*' or c == '&' or c == '|' or c == '?' or c == '<')) {
+            s.advance();
+            if (s.current() == '=' and c != '+' and c != '-') {
+                s.advance();
                 return getOpOpEqTokens(c);
             }
             return getOpOpTokens(c);
-        } else if (c == '?' and self.current() == '.' and (self.lookAhead() < '0' or self.lookAhead() > '9')) {
-            self.advance();
+        } else if (c == '?' and s.current() == '.' and (s.lookAhead() < '0' or s.lookAhead() > '9')) {
+            s.advance();
             return .OptChainToken;
-        } else if (c == '=' and self.current() == '>') {
-            self.advance();
+        } else if (c == '=' and s.current() == '>') {
+            s.advance();
             return .ArrowToken;
-        } else if (c == '>' and self.current() == '>') {
-            self.advance();
-            if (self.current() == '>') {
-                self.advance();
-                if (self.current() == '=') {
-                    self.advance();
+        } else if (c == '>' and s.current() == '>') {
+            s.advance();
+            if (s.current() == '>') {
+                s.advance();
+                if (s.current() == '=') {
+                    s.advance();
                     return .GtGtGtEqToken;
                 }
                 return .GtGtGtToken;
-            } else if (self.current() == '=') {
-                self.advance();
+            } else if (s.current() == '=') {
+                s.advance();
                 return .GtGtEqToken;
             }
             return .GtGtToken;
@@ -561,34 +562,34 @@ pub const Scanner = struct {
     }
 
     // TODO: Fix this function. Including the Unicode part
-    fn consumeIdentifierToken(self: *Self) bool {
-        var c = self.current();
+    fn consumeIdentifierToken(s: *Scanner) bool {
+        var c = s.current();
         if (identifierStartTable[c]) {
-            self.advance();
+            s.advance();
         } else if (0xC0 <= c) {
-            const rr = self.peekRune();
+            const rr = s.peekRune();
             if (isIdentifierStart(rr.r)) {
-                self.move(rr.n);
+                s.move(rr.n);
             } else {
                 return false;
             }
-        } else if (!(self.consumeUnicodeEscape())) {
+        } else if (!(s.consumeUnicodeEscape())) {
             return false;
         }
         while (true) {
-            c = self.current();
+            c = s.current();
             if (identifierTable[c]) {
-                self.advance();
+                s.advance();
             } else if (0xC0 <= c) {
-                const rr = self.peekRune();
-                if (rr.r == '\u{200C}' or rr.r == '\u{200D}' or (rr.r == '\u{00}' and !self.end()) or isIdentifierContinue(rr.r)) {
-                    self.move(rr.n);
+                const rr = s.peekRune();
+                if (rr.r == '\u{200C}' or rr.r == '\u{200D}' or (rr.r == '\u{00}' and !s.end()) or isIdentifierContinue(rr.r)) {
+                    s.move(rr.n);
                 } else {
                     break;
                 }
-            } else if (!(self.consumeUnicodeEscape())) {
-                if (c == 0 and !self.end()) {
-                    self.advance();
+            } else if (!(s.consumeUnicodeEscape())) {
+                if (c == 0 and !s.end()) {
+                    s.advance();
                     continue;
                 }
                 break;
@@ -598,167 +599,167 @@ pub const Scanner = struct {
     }
 
     // TODO:
-    fn consumeNumericSeparator(self: *Self, t: DigitType) bool {
-        if (self.current() != '_') {
+    fn consumeNumericSeparator(s: *Scanner, t: DigitType) bool {
+        if (s.current() != '_') {
             return false;
         }
-        self.advance();
+        s.advance();
         var res = (switch (t) {
-            DigitType.Hex => self.consumeHexDigit(),
-            DigitType.Binary => self.consumeBinaryDigit(),
-            DigitType.Octal => self.consumeOctalDigit(),
-            DigitType.Digit => self.consumeDigit(),
+            DigitType.Hex => s.consumeHexDigit(),
+            DigitType.Binary => s.consumeBinaryDigit(),
+            DigitType.Octal => s.consumeOctalDigit(),
+            DigitType.Digit => s.consumeDigit(),
         });
         if (!res) {
-            self.move(-1);
+            s.move(-1);
             return false;
         }
         return true;
     }
 
-    fn consumeNumericToken(self: *Self) TokenType {
+    fn consumeNumericToken(s: *Scanner) TokenType {
         // assume to be on 0 1 2 3 4 5 6 7 8 9 .
-        const first = self.current();
+        const first = s.current();
         if (first == '0') {
-            self.advance();
-            const c = self.current();
+            s.advance();
+            const c = s.current();
             if (c == 'x' or c == 'X') {
-                self.advance();
-                if (self.consumeHexDigit()) {
-                    while ((self.consumeHexDigit()) or (self.consumeNumericSeparator(DigitType.Hex))) {}
+                s.advance();
+                if (s.consumeHexDigit()) {
+                    while ((s.consumeHexDigit()) or (s.consumeNumericSeparator(DigitType.Hex))) {}
                     return .HexadecimalToken;
                 }
-                self.advance();
-                self.addError("Invalid Hexadecimal Token");
+                s.advance();
+                s.addError("Invalid Hexadecimal Token");
                 return .ErrorToken;
             } else if (c == 'b' or c == 'B') {
-                self.advance();
-                if (self.consumeBinaryDigit()) {
-                    while ((self.consumeBinaryDigit()) or (self.consumeNumericSeparator(DigitType.Binary))) {}
+                s.advance();
+                if (s.consumeBinaryDigit()) {
+                    while ((s.consumeBinaryDigit()) or (s.consumeNumericSeparator(DigitType.Binary))) {}
                     return .BinaryToken;
                 }
-                self.advance();
-                self.addError("invalid binary number");
+                s.advance();
+                s.addError("invalid binary number");
                 return .ErrorToken;
             } else if (c == 'o' or c == 'O') {
-                self.advance();
-                if (self.consumeOctalDigit()) {
-                    while ((self.consumeOctalDigit()) or (self.consumeNumericSeparator(DigitType.Octal))) {}
+                s.advance();
+                if (s.consumeOctalDigit()) {
+                    while ((s.consumeOctalDigit()) or (s.consumeNumericSeparator(DigitType.Octal))) {}
                     return .OctalToken;
                 }
-                self.advance();
-                self.addError("invalid octal number");
+                s.advance();
+                s.addError("invalid octal number");
                 return .ErrorToken;
             } else if (c == 'n') {
-                self.advance();
+                s.advance();
                 return .BigIntToken;
-            } else if ('0' <= self.current() and self.current() <= '9') {
-                self.addError("legacy octal numbers are not supported");
-                while ((self.consumeDigit()) or (self.consumeNumericSeparator(DigitType.Digit))) {}
+            } else if ('0' <= s.current() and s.current() <= '9') {
+                s.addError("legacy octal numbers are not supported");
+                while ((s.consumeDigit()) or (s.consumeNumericSeparator(DigitType.Digit))) {}
                 return .ErrorToken;
             }
         } else if (first != '.') {
-            while ((self.consumeDigit()) or (self.consumeNumericSeparator(DigitType.Digit))) {}
+            while ((s.consumeDigit()) or (s.consumeNumericSeparator(DigitType.Digit))) {}
         }
         // we have parsed a 0 or an integer number
-        var c = self.current();
+        var c = s.current();
         if (c == '.') {
-            self.advance();
-            if (self.consumeDigit()) {
-                while ((self.consumeDigit()) or (self.consumeNumericSeparator(DigitType.Digit))) {}
-                c = self.current();
+            s.advance();
+            if (s.consumeDigit()) {
+                while ((s.consumeDigit()) or (s.consumeNumericSeparator(DigitType.Digit))) {}
+                c = s.current();
             } else if (first == '.') {
                 // number starts with a dot and must be followed by digits
-                self.move(-1);
+                s.move(-1);
                 return .ErrorToken; // may be dot or ellipsis
             } else {
-                c = self.current();
+                c = s.current();
             }
         } else if (c == 'n') {
-            self.advance();
+            s.advance();
             return .BigIntToken;
         }
         if (c == 'e' or c == 'E') {
-            self.advance();
-            c = self.current();
+            s.advance();
+            c = s.current();
             if (c == '+' or c == '-') {
-                self.advance();
+                s.advance();
             }
-            if (!(self.consumeDigit())) {
-                if (self.current() == '+' or self.current() == '-') {
-                    self.advance();
-                    while ((self.consumeDigit()) or (self.consumeNumericSeparator(DigitType.Digit))) {}
+            if (!(s.consumeDigit())) {
+                if (s.current() == '+' or s.current() == '-') {
+                    s.advance();
+                    while ((s.consumeDigit()) or (s.consumeNumericSeparator(DigitType.Digit))) {}
                 }
-                self.addError("invalid number");
+                s.addError("invalid number");
                 return .ErrorToken;
             }
-            while ((self.consumeDigit()) or (self.consumeNumericSeparator(DigitType.Digit))) {}
+            while ((s.consumeDigit()) or (s.consumeNumericSeparator(DigitType.Digit))) {}
         }
         return .DecimalToken;
     }
 
-    fn consumeStringToken(self: *Self) bool {
+    fn consumeStringToken(s: *Scanner) bool {
         // assume to be on ' or "
-        // const mark = self.getMark();
-        const delim = self.current();
-        self.advance();
+        // const mark = s.getMark();
+        const delim = s.current();
+        s.advance();
         while (true) {
-            var c = self.current();
+            var c = s.current();
             if (c == delim) {
-                self.advance();
+                s.advance();
                 break;
             } else if (c == '\\') {
-                self.advance();
-                if (!(self.consumeLineTerminator())) {
-                    c = self.current();
+                s.advance();
+                if (!(s.consumeLineTerminator())) {
+                    c = s.current();
                     if (c == delim or c == '\\') {
-                        self.advance();
+                        s.advance();
                     }
                 }
                 continue;
-            } else if (c == '\n' or c == '\r' or (c == 0 and self.end())) {
-                if (c == 0 and self.end()) return false;
-                self.advance();
-                // self.rewind(mark);
+            } else if (c == '\n' or c == '\r' or (c == 0 and s.end())) {
+                if (c == 0 and s.end()) return false;
+                s.advance();
+                // s.rewind(mark);
                 return false;
             }
-            self.advance();
+            s.advance();
         }
         return true;
     }
 
-    fn consumeRegExpToken(self: *Self) bool {
+    fn consumeRegExpToken(s: *Scanner) bool {
         // assume to be on /
-        self.advance();
+        s.advance();
         var inClass = false;
         while (true) {
-            var c = self.current();
+            var c = s.current();
             if (!inClass and c == '/') {
-                self.advance();
+                s.advance();
                 break;
             } else if (c == '[') {
                 inClass = true;
             } else if (c == ']') {
                 inClass = false;
             } else if (c == '\\') {
-                self.advance();
-                if (self.isLineTerminator() or self.current() == 0 and self.errors.items.len == 0) {
+                s.advance();
+                if (s.isLineTerminator() or s.current() == 0 and s.errors.items.len == 0) {
                     return false;
                 }
-            } else if (self.isLineTerminator() or c == 0 and self.errors.items.len == 0) {
+            } else if (s.isLineTerminator() or c == 0 and s.errors.items.len == 0) {
                 return false;
             }
-            self.advance();
+            s.advance();
         }
         // flags
         while (true) {
-            var c = self.current();
+            var c = s.current();
             if (identifierTable[c]) {
-                self.advance();
+                s.advance();
             } else if (0xC0 <= c) {
-                const rr = self.peekRune();
+                const rr = s.peekRune();
                 if (rr.r == '\u{200C}' or rr.r == '\u{200D}' or isIdentifierContinue(rr.r)) {
-                    self.move(rr.n);
+                    s.move(rr.n);
                 } else {
                     break;
                 }
@@ -769,40 +770,40 @@ pub const Scanner = struct {
         return true;
     }
 
-    fn consumeTemplateToken(self: *Self) TokenType {
+    fn consumeTemplateToken(s: *Scanner) TokenType {
         // assume to be on ` or } when already within template
-        var continuation = self.current() == '}';
-        self.advance();
+        var continuation = s.current() == '}';
+        s.advance();
         while (true) {
-            var c = self.current();
+            var c = s.current();
             if (c == '`') {
                 // TODO
-                // self.templateLevels.items = self.templateLevels.items[0..(self.templateLevels.items.len - 1)];
-                const sl = self.templateLevels.toOwnedSlice();
+                // s.templateLevels.items = s.templateLevels.items[0..(s.templateLevels.items.len - 1)];
+                const sl = s.templateLevels.toOwnedSlice();
                 // const len = sl.len;
-                self.templateLevels = ArrayList(usize).fromOwnedSlice(self.internal_allocator, sl[0..(sl.len - 1)]);
-                self.advance();
+                s.templateLevels = ArrayList(usize).fromOwnedSlice(s.internal_allocator, sl[0..(sl.len - 1)]);
+                s.advance();
                 if (continuation) {
                     return .TemplateEndToken;
                 }
                 return .TemplateToken;
-            } else if (c == '$' and self.lookAhead() == '{') {
-                self.level += 1;
-                self.move(2);
+            } else if (c == '$' and s.lookAhead() == '{') {
+                s.level += 1;
+                s.move(2);
                 if (continuation) {
                     return .TemplateMiddleToken;
                 }
                 return .TemplateStartToken;
             } else if (c == '\\') {
-                self.advance();
-                c = self.current();
+                s.advance();
+                c = s.current();
                 if (c != 0) {
-                    self.advance();
+                    s.advance();
                 }
                 continue;
-            } else if (c == 0 and self.errors.items.len == 0) {
-                if (!self.end()) {
-                    self.advance();
+            } else if (c == 0 and s.errors.items.len == 0) {
+                if (!s.end()) {
+                    s.advance();
                     continue;
                 }
                 if (continuation) {
@@ -810,74 +811,78 @@ pub const Scanner = struct {
                 }
                 return .TemplateToken;
             }
-            self.advance();
+            s.advance();
         }
     }
 
-    fn processRawText(self: *Self, start: usize, end_p: usize) void {
-        var old_code = self.code;
-        var old_cursor = self.cursor;
-        var old_start = self.start;
-        var old_raw_text_offset = self.raw_text_offset;
+    fn processRawText(s: *Scanner, start: usize, end_p: usize) void {
+        var old_code = s.code;
+        var old_cursor = s.cursor;
+        var old_start = s.start;
+        var old_raw_text_offset = s.raw_text_offset;
 
-        self.raw_text_offset = self.raw_text_offset + self.start;
-        self.start = 0;
-        self.cursor = 0;
-        _ = self.scan(old_code[start..end_p]);
-        self.raw_text_offset = old_raw_text_offset;
+        s.raw_text_offset = s.raw_text_offset + s.start;
+        s.start = 0;
+        s.cursor = 0;
+        _ = s.scan(old_code[start..end_p]);
+        s.raw_text_offset = old_raw_text_offset;
 
-        self.start = old_start;
-        self.cursor = old_cursor;
-        self.code = old_code;
+        s.start = old_start;
+        s.cursor = old_cursor;
+        s.code = old_code;
     }
 
-    fn addTok(self: *Self, tok_type: TokenType, start: usize, endPos: usize) void {
-        self.tokens.append(Token{
-            .start = start + self.raw_text_offset,
-            .end = endPos + self.raw_text_offset,
+    fn addTok(s: *Scanner, tok_type: TokenType, start_pos: usize, end_pos: usize) void {
+        s.tokens.append(Token{
+            .start = start_pos + s.raw_text_offset,
+            .end = end_pos + s.raw_text_offset,
             .tok_type = tok_type,
+			.start_line = s.start_line,
+			.end_line = s.end_line,
+			.start_col = s.start_col,
+			.end_col = s.end_col,
         }) catch unreachable;
     }
 
-    fn parseRawText(self: *Self) void {
-        var c = self.lookAhead();
+    fn parseRawText(s: *Scanner) void {
+        var c = s.lookAhead();
         var curlyBracketDepth: usize = 0;
         var string_type: u8 = 0;
 
-        while (!self.end() and (c != '}' or curlyBracketDepth != 0)) {
+        while (!s.end() and (c != '}' or curlyBracketDepth != 0)) {
             if (c == '{' and string_type == 0) {
                 curlyBracketDepth += 1;
             }
             if (string_type != 0 and c == '\\') {
-                _ = self.advance();
-                _ = self.advance();
-                c = self.lookAhead();
+                _ = s.advance();
+                _ = s.advance();
+                c = s.lookAhead();
             }
             if (string_type == c) {
                 string_type = 0;
             } else if (string_type == 0 and (c == '"' or c == '\'' or c == '`')) {
                 string_type = c;
             }
-            _ = self.advance();
-            c = self.lookAhead();
+            _ = s.advance();
+            c = s.lookAhead();
 
             if (c == '}') {
                 if (curlyBracketDepth > 0 and string_type == 0) {
                     curlyBracketDepth -= 1;
                 } else if (string_type != 0) {
-                    _ = self.advance();
-                    c = self.lookAhead();
+                    _ = s.advance();
+                    c = s.lookAhead();
                 }
             }
         }
     }
 
-    fn lexeme(self: *Self) []const u8 {
-        return self.code[self.start..self.cursor];
+    fn lexeme(s: *Scanner) []const u8 {
+        return s.code[s.start..s.cursor];
     }
 
-    fn equalFold(self: *Self, s: []const u8, targetLower: []const u8) bool {
-        const lxx = self.internal_allocator.alloc(u8, s.len) catch unreachable;
+    fn equalFold(s: *Scanner, str: []const u8, targetLower: []const u8) bool {
+        const lxx = s.internal_allocator.alloc(u8, str.len) catch unreachable;
         std.mem.copy(u8, lxx, s);
         for (lxx) |_, i| {
             lxx[i] = std.ascii.toLower(s[i]);
@@ -888,37 +893,39 @@ pub const Scanner = struct {
         for (targetLower) |c, i| {
             const d = lxx[i];
             if (d != c and (d < 'A' or d > 'Z' or (d + ('a' - 'A')) != c)) {
+                s.internal_allocator.free(lxx);
                 return false;
             }
         }
+        s.internal_allocator.free(lxx);
         return true;
     }
 
-    fn hexDigit(self: *Self) bool {
-        const c = self.lookAhead();
+    fn hexDigit(s: *Scanner) bool {
+        const c = s.lookAhead();
         return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' or c <= 'F');
     }
 
-    fn peekRune(self: *Self) RuneStruct {
-        const pos = self.cursor;
-        const c = self.current();
+    fn peekRune(s: *Scanner) RuneStruct {
+        const pos = s.cursor;
+        const c = s.current();
         var r: u21 = rune(c);
         var n: u8 = 1;
-        if (c < 192 or self.peek(1) == 0) {
+        if (c < 192 or s.peek(1) == 0) {
             r = rune(c);
             n = 1;
-        } else if (c < 224 or self.peek(2) == 0) {
-            r = std.unicode.utf8Decode2(self.code[pos..(pos + 2)]) catch {
+        } else if (c < 224 or s.peek(2) == 0) {
+            r = std.unicode.utf8Decode2(s.code[pos..(pos + 2)]) catch {
                 return RuneStruct{ .r = r, .n = n };
             };
             n = 2;
-        } else if (c < 240 or self.peek(3) == 0) {
-            r = std.unicode.utf8Decode3(self.code[pos..(pos + 3)]) catch {
+        } else if (c < 240 or s.peek(3) == 0) {
+            r = std.unicode.utf8Decode3(s.code[pos..(pos + 3)]) catch {
                 return RuneStruct{ .r = r, .n = n };
             };
             n = 3;
         } else {
-            r = std.unicode.utf8Decode4(self.code[pos..(pos + 4)]) catch {
+            r = std.unicode.utf8Decode4(s.code[pos..(pos + 4)]) catch {
                 return RuneStruct{ .r = r, .n = n };
             };
             n = 4;
@@ -927,88 +934,76 @@ pub const Scanner = struct {
         return RuneStruct{ .r = r, .n = n };
     }
 
-    fn peek(self: *Self, n: usize) u8 {
-        const pos = n + self.cursor;
-        if (self.code.len <= pos) {
+    fn peek(s: *Scanner, n: usize) u8 {
+        const pos = n + s.cursor;
+        if (s.code.len <= pos) {
             return 0;
         }
-        return self.code[pos];
+        return s.code[pos];
     }
 
-    fn move(self: *Self, n: i32) void {
-        const newPos = @intCast(usize, @intCast(i32, self.cursor) + n);
-        self.cursor = newPos;
+    fn move(p: *Scanner, n: i32) void {
+        const newPos = @intCast(usize, @intCast(i32, p.cursor) + n);
+        p.cursor = newPos;
     }
 
-    fn current(self: *Self) u8 {
-        return self.peek(0);
+    fn current(s: *Scanner) u8 {
+        return s.peek(0);
     }
 
     /// look one character ahead
-    fn lookAhead(self: *Self) u8 {
-        return self.peek(1);
+    fn lookAhead(s: *Scanner) u8 {
+        return s.peek(1);
     }
 
     /// look two characters ahead
-    fn lookSuperAhead(self: *Self) u8 {
-        return self.peek(2);
+    fn lookSuperAhead(s: *Scanner) u8 {
+        return s.peek(2);
     }
 
-    fn lookSuperDuperAhead(self: *Self) u8 {
-        return self.peek(3);
+    fn lookSuperDuperAhead(s: *Scanner) u8 {
+        return s.peek(3);
     }
 
-    fn match(self: *Self, expectedChar: u8) bool {
-        if (self.end()) return false;
-        if (self.code[self.cursor] != expectedChar) return false;
-        self.*.cursor += 1;
+    fn match(s: *Scanner, expectedChar: u8) bool {
+        if (s.end()) return false;
+        if (s.code[s.cursor] != expectedChar) return false;
+        s.*.cursor += 1;
         return true;
     }
 
-    fn advance(self: *Self) void {
-        const c = self.lookAhead();
-        if (c == '\r' or c == '\n') {
-            if (c == '\n') {
-                self.line += 1;
-                self.col = 1;
-                self.cursor += 1;
-            } else {
-                if (!self.end() and self.lookSuperAhead() == '\n') {
-                    self.line += 1;
-                    self.col = 1;
-                    self.cursor += 2;
-                }
-            }
-        }
+    fn advance(s: *Scanner) void {
+        if (s.lookAhead() == '\n') {
+            s.end_line += 1;
+            s.end_col = 0;
+        } else {
+			s.end_col += 1;
+		}
+        s.cursor += 1;
     }
 
-    fn rewind(self: *Self, mark: usize) void {
-        self.cursor = self.start + mark;
+    fn rewind(s: *Scanner, mark: usize) void {
+        s.cursor = s.start + mark;
     }
 
-    fn getMark(self: *Self) usize {
-        return self.cursor - self.start;
+    fn getMark(s: *Scanner) usize {
+        return s.cursor - s.start;
     }
 
-    fn end(self: *Self) bool {
-        return self.cursor >= self.code.len;
+    fn end(s: *Scanner) bool {
+        return s.cursor >= s.code.len;
     }
 
-    pub fn addTokenAdvance(self: *Self, tok_type: TokenType, steps: usize) void {
-        self.cursor += steps;
-        self.addToken(tok_type);
+    pub fn addToken(s: *Scanner, tok_type: TokenType) void {
+        s.addTok(tok_type, s.start, s.cursor);
     }
 
-    pub fn addToken(self: *Self, tok_type: TokenType) void {
-        self.addTok(tok_type, self.start, self.cursor);
-    }
-
-    pub fn addError(self: *Self, message: []const u8) void {
+    pub fn addError(s: *Scanner, message: []const u8) void {
         var line: usize = 1;
         var col: usize = 1;
         var i: usize = 0;
-        while (i < self.start) : (i += 1) {
-            if (self.code[i] == '\n') {
+        while (i < s.start) : (i += 1) {
+            if (s.code[i] == '\n') {
                 line += 1;
                 col = 1;
             } else {
@@ -1018,32 +1013,30 @@ pub const Scanner = struct {
 
         _ = message;
 
-        self.errors.append(Error{
+        s.errors.append(Error{
             .line = line,
             .col = col,
-            .start = self.start,
-            .end = self.cursor,
+            .start = s.start,
+            .end = s.cursor,
             .error_type = ParserErrorType.TokenizerError,
         }) catch unreachable;
     }
 
     // Only for debugging purposes
-    pub fn printTokens(self: *Self) void {
-        std.debug.print("========= TOKENS ===========\nToken length: {d}\n", .{self.tokens.items.len});
-        for (self.tokens.items) |tok| {
-            std.debug.print("{s}\n", .{
-                tok.toString(self.internal_allocator, self.code),
-            });
+    pub fn printTokens(p: *Scanner) void {
+        std.debug.print("========= TOKENS ===========\nToken length: {d}\n", .{p.tokens.items.len});
+        for (p.tokens.items) |tok| {
+            std.debug.print("{s}\n", .{tok.toPrintString(p.internal_allocator, p.code)});
         }
         std.debug.print("====================\n", .{});
     }
 
-    pub fn deinitInternal(self: *Self) void {
-        self.scanner_arena.deinit();
-        self.allocator.destroy(self.scanner_arena);
+    pub fn deinitInternal(s: *Scanner) void {
+        s.scanner_arena.deinit();
+        s.allocator.destroy(s.scanner_arena);
     }
 
-    pub fn deinit(self: *Self) void {
-        self.deinitInternal();
+    pub fn deinit(s: *Scanner) void {
+        s.deinitInternal();
     }
 };

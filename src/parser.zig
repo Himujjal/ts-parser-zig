@@ -28,112 +28,13 @@ pub const ParserOptions = struct {
     is_ts_enabled: bool = false,
 };
 
-const Scope = struct {
-	start_token_index: usize,
-	end_token_index: usize,
-	isFunctionScope: bool,
-};
-
-const State = struct {
-    a: Allocator = undefined,
-    /// Used to signify the start of a potential arrow function
-    potentialArrowAt: i32 = -1,
-
-    /// Used by Flow to handle an edge case involving function type parsing.
-    noAnonFunctionType: bool = false,
-
-    /// Used by TypeScript to handle ambiguities when parsing conditional types.
-    inDisallowConditionalTypesContext: bool = false,
-
-    /// Token store.
-    tokens: ArrayList(Token) = undefined,
-
-    /// Array of all observed scopes, ordered by their ending position.
-    scopes: ArrayList(Scope) = undefined,
-
-    /// The current position of the tokenizer in the input.
-    pos: usize = 0,
-
-    /// Information about the current token.
-    type: TokenType = TT.EOF,
-    contextualKeyword: ContextualKeyword = ContextualKeyword.NONE,
-    start: usize = 0,
-    end: usize = 0,
-
-    isType: bool = false,
-    scopeDepth: usize = 0,
-
-    /// If the parser is in an error state, then the token is always tt.eof and all functions can
-    /// keep executing but should be written so they don't get into an infinite loop in this situation.
-    ///
-    /// This approach, combined with the ability to snapshot and restore state, allows us to implement
-    /// backtracking without exceptions and without needing to explicitly propagate error states
-    /// everywhere.
-    err: ?Error = null,
-
-	pub fn init(a: Allocator) State {
-		return State{
-			.a = a,
-			.tokens = ArrayList(Token).init(a),
-			.scopes = ArrayList(Scope).init(a),
-		};
-	}
-
-    pub fn getSnapshot(this: *State) StateSnapshot {
-        return StateSnapshot{
-            this.potentialArrowAt,
-            this.noAnonFunctionType,
-            this.inDisallowConditionalTypesContext,
-            this.tokens.length,
-            this.scopes.length,
-            this.pos,
-            this.type,
-            this.contextualKeyword,
-            this.start,
-            this.end,
-            this.isType,
-            this.scopeDepth,
-            this.err,
-        };
-    }
-
-    pub fn restoreFromSnapshot(this: *State, snapshot: StateSnapshot) void {
-        this.potentialArrowAt = snapshot.potentialArrowAt;
-        this.noAnonFunctionType = snapshot.noAnonFunctionType;
-        this.inDisallowConditionalTypesContext = snapshot.inDisallowConditionalTypesContext;
-        this.tokens.length = snapshot.tokensLength;
-        this.scopes.length = snapshot.scopesLength;
-        this.pos = snapshot.pos;
-        this.type = snapshot.type;
-        this.contextualKeyword = snapshot.contextualKeyword;
-        this.start = snapshot.start;
-        this.end = snapshot.end;
-        this.isType = snapshot.isType;
-        this.scopeDepth = snapshot.scopeDepth;
-        this.err = snapshot.err;
-    }
-};
-
-const StateSnapshot = struct {
-	potentialArrowAt: usize,
-    noAnonFunctionType: bool,
-    inDisallowConditionalTypesContext: bool,
-    tokensLength: usize,
-    scopesLength: usize,
-    pos: usize,
-    type: TokenType,
-    contextualKeyword: ContextualKeyword,
-    start: usize,
-    end: usize,
-    isType: bool,
-    scopeDepth: usize,
-    err: ?Error = null,
-};  
-
 // ------ Nodes --------
-// const Program = nodes.Program;
-// const Block = nodes.Block;
-// const Statement = nodes.Statement;
+const Program = nodes.Program;
+const Stmt = nodes.Stmt;
+const EmptyStmt = nodes.EmptyStmt;
+const Block = nodes.Block;
+const ExprStmt = nodes.ExprStmt;
+const Raw = nodes.Raw;
 // const DirectivePrologue = nodes.DirectivePrologue;
 // const WSs = nodes.WSs;
 
@@ -142,8 +43,6 @@ const StateSnapshot = struct {
 // const VarDeclStmt = nodes.VarDeclStmt;
 // const FunctionDecl = nodes.FunctionDecl;
 // const ClassDecl = nodes.ClassDecl;
-// const ExprStmt = nodes.ExprStmt;
-// const Expr = nodes.Expr;
 
 // const BreakStmt = nodes.BreakStmt;
 // const ContinueStmt = nodes.ContinueStmt;
@@ -159,8 +58,9 @@ const StateSnapshot = struct {
 // const WhileStmt = nodes.WhileStmt;
 // const WithStmt = nodes.WithStmt;
 // const EmptyStmt = nodes.EmptyStmt;
-// const StatementListItem = nodes.StatementListItem;
+const StmtListItem = nodes.StmtListItem;
 
+const Expr = nodes.Expr;
 // const NewExpr = nodes.NewExpr;
 // const AssignmentExpr = nodes.AssignmentExpr;
 // const BinaryExpr = nodes.BinaryExpr;
@@ -220,8 +120,7 @@ pub const Parser = struct {
     tokens: *ArrayList(Token),
     options: ParserOptions,
 
-    state: State,
-    nextContextId: usize = 1,
+    scanner_instance: Scanner,
 
     parser_arena: *ArenaAllocator,
     _a: Allocator,
@@ -237,15 +136,16 @@ pub const Parser = struct {
         var warnings = allocator.create(ArrayList(Error)) catch unreachable;
         warnings.* = ArrayList(Error).init(allocator);
 
-        const scannerInstance = Scanner.init(
+        var scanner_instance = Scanner.init(
             allocator,
             tokens,
             errors,
             warnings,
         );
-        _ = scannerInstance.scan();
 
-		const _a = parser_arena.allocator();
+        _ = scanner_instance.scan(code);
+
+        const _a = parser_arena.allocator();
 
         return Self{
             .allocator = allocator,
@@ -255,17 +155,135 @@ pub const Parser = struct {
             .tokens = tokens,
             .parser_arena = parser_arena,
             .code = code,
-			.state = State.init(_a),
+            .scanner_instance = scanner_instance,
             ._a = _a,
         };
     }
 
-    pub fn parse(p: *Self) *Self {
-        // p.options = options;
-        // _ = p.scannerInstance.scan(code);
-        // p.program = p.parseProgram();
-        // p.program.source_type = if (options.is_script) .SCRIPT else .MODULE;
-        return p;
+    pub fn parse(p: *Self) !Program {
+        p.skipWS();
+        const start = p.start;
+        const stmt_list_item = try p.parseStmtListItemUpto(&[_]TT{TT.EOF});
+        const program = Program{ .loc = try p.getLocation(start), .stmt_list_item = stmt_list_item };
+        return program;
+    }
+
+    fn parseStmtListItemUpto(p: *Parser, tts: []const TT) ![]const StmtListItem {
+        var stmts = ArrayList(StmtListItem).init(p._a);
+        while (!matchTokensWithToken(tts, p.current().tok_type)) {
+            const stmt = try p.parseStmtListItem();
+            if (stmt) |_stmt| {
+                try stmts.append(_stmt);
+            } else {
+                break;
+            }
+        }
+        return stmts.toOwnedSlice();
+    }
+
+    fn parseStmtsUpto(p: *Parser, tts: []const TT) ![]const Stmt {
+        var stmts = ArrayList(Stmt).init(p._a);
+        while (!matchTokensWithToken(tts, p.current().tok_type)) {
+            if (try p.parseStmt()) |stmt| try stmts.append(stmt) else break;
+        }
+        return stmts.toOwnedSlice();
+    }
+
+    fn parseStmtListItem(p: *Parser) !?StmtListItem {
+        var tok: Token = p.current();
+        switch (tok.tok_type) {
+            TT.ExportToken => {
+                // TODO: handle export
+            },
+            TT.ImportToken => {
+                // TODO: Handle Import
+            },
+            TT.ConstToken, TT.LetToken, TT.VarToken => {
+                // TODO: Handle Var declaration
+            },
+            TT.FunctionToken => {
+                // TODO: Function
+            },
+            TT.ClassToken => {
+                // TODO: Handle Class
+            },
+
+            else => {
+                const stmt = try p.parseStmt();
+                if (stmt) |_stmt| return StmtListItem{ .stmt = _stmt };
+                return StmtListItem{ .raw = try p.parseRaw(&[_]TT{}) };
+            },
+        }
+        return null;
+    }
+
+    fn parseStmt(p: *Parser) !?Stmt {
+        return switch (p.current().tok_type) {
+            TT.SemicolonToken => Stmt{ .empty_stmt = try p.parseEmptyStmt() },
+            TT.OpenBraceToken => p.parseBlock(),
+            else => null,
+        };
+    }
+
+    fn parseEmptyStmt(p: *Parser) !*EmptyStmt {
+        const start = p.start;
+        p.advance();
+        return try p.heapInit(EmptyStmt, EmptyStmt{ .loc = try p.getLocation(start) });
+    }
+
+    fn parseBlock(p: *Parser) !?Stmt {
+        const start = p.start;
+        p.advance();
+        var stmts: ArrayList(Stmt) = ArrayList(Stmt).init(p._a);
+
+        var curr_tt = p.current().tok_type;
+        while (curr_tt != TT.CloseBraceToken and curr_tt != TT.EOF) {
+            curr_tt = p.advanceAndNext().tok_type;
+        }
+        if (curr_tt == TT.CloseBraceToken) p.advance();
+        return Stmt{ .block_stmt = try p.heapInit(Block, Block{
+            .loc = try p.getLocation(start),
+            .stmts = stmts.items,
+        }) };
+    }
+
+    fn parseRaw(p: *Self, matchers: []const TT) !Raw {
+        const start = p.start;
+        var tt = p.current().tok_type;
+        tt = p.advanceAndNext().tok_type;
+
+        var raw_arr: ArrayList(*Token) = ArrayList(*Token).init(p._a);
+
+        while (!p.isEnd() or !matchTokensWithToken(matchers, tt)) {
+            if (p.previous().tok_type == TT.SemicolonToken) break;
+
+            switch (tt) {
+                // All the declarations and statements combined and
+                TT.ClassToken,
+                TT.FunctionToken,
+                TT.VarToken,
+                TT.ForToken,
+                TT.IfToken,
+                TT.WhileToken,
+                TT.ReturnToken,
+                TT.AsyncToken,
+                => {
+                    break;
+                },
+                else => {
+                    try raw_arr.append(&p.tokens.items[p.cursor]);
+                    tt = p.advanceAndNext().tok_type;
+                },
+            }
+        }
+        return Raw{ .loc = try p.getLocation(start), .tokens = raw_arr.items };
+    }
+
+    fn skipWS(p: *Self) void {
+        var tt = p.current().tok_type;
+        while (tt != TT.EOF or tt == TT.WhitespaceToken or tt == TT.CommentToken) {
+            tt = p.advanceAndNext().tok_type;
+        }
     }
 
     pub fn deinitInternal(p: *Self) void {
@@ -276,12 +294,12 @@ pub const Parser = struct {
         p.allocator.destroy(p.tokens);
     }
 
-    pub fn deinit(p: *Self) void {
+    pub fn deinit(p: *Parser) void {
         p.tokens.deinit();
         p.errors.deinit();
         p.warnings.deinit();
         p.deinitInternal();
-        p.scannerInstance.deinit();
+        p.scanner_instance.deinit();
     }
 
     /// Advance 1 token ahead
@@ -297,7 +315,7 @@ pub const Parser = struct {
     /// Consumes the current token, if token doesn't match TT, add Error,
     /// if (matcher != null) Compare the token_string with matcher. Add Error if mismatch
     /// Moves the cursor by 1 step. Returns the current token before the move
-    fn eat(p: *Parser, tt: TT, matcher: ?[]const u8) ?Token {
+    fn eat(p: *Parser, tt: TT, matcher: ?[]const u8) ?*Token {
         const curr = p.current();
         if (curr.tok_type == tt) {
             if (matcher) |_matcher| {
@@ -314,7 +332,7 @@ pub const Parser = struct {
             return null;
         }
         p.advance();
-        return p.tokens.items[p.cursor - 1];
+        return &p.tokens.items[p.cursor - 1];
     }
 
     /// Eat Token but don't emit any error
@@ -348,20 +366,20 @@ pub const Parser = struct {
         }) catch unreachable;
     }
 
-    pub fn tolerateError(p: *Parser, _error_type: ParserErrorType) void {
+    fn tolerateError(p: *Parser, _error_type: ParserErrorType) void {
         p.addError(_error_type);
     }
 
-    pub fn getToken(p: *Parser, token_index: usize) Token {
+    fn getToken(p: *Parser, token_index: usize) Token {
         return p.tokens.items[token_index];
     }
 
-    pub fn throwUnexpectedToken(p: *Parser) void {
+    fn throwUnexpectedToken(p: *Parser) void {
         p.addError(ParserErrorType{ .UnexpectedToken = p.current() });
     }
 
     /// Adds an Expected Found Error
-    pub fn addExpectedFoundError(p: *Parser, expected: []const u8, found: []const u8) void {
+    fn addExpectedFoundError(p: *Parser, expected: []const u8, found: []const u8) void {
         const curr = p.current();
         p.errors.append(Error{
             .line = curr.start_line,
@@ -375,48 +393,63 @@ pub const Parser = struct {
     }
 
     /// Advance one step and get the next token
-    pub fn advanceAndNext(p: *Parser) Token {
+    fn advanceAndNext(p: *Parser) Token {
         p.advance();
         return p.current();
     }
 
     /// Get the string value of the token under the cursor
-    pub fn getCurrTokStr(p: *Parser) []const u8 {
+    fn getCurrTokStr(p: *Parser) []const u8 {
         const curr = p.current();
         return p.code[curr.start..curr.end];
     }
 
     /// Get the current token under the cursor
-    pub fn current(p: *Parser) Token {
+    fn current(p: *Parser) Token {
         return p.tokens.items[p.cursor];
     }
 
-    pub fn lookAhead(p: *Parser) Token {
+    /// Look one step ahead and get the
+    fn lookAhead(p: *Parser) Token {
+        if (p.cursor + 1 >= p.tokens.len) return p.tokens.items[p.tokens.items.len - 1];
         return p.tokens.items[p.cursor + 1];
     }
 
+    fn previous(p: *Parser) Token {
+        if (p.cursor == 0) return p.tokens.items[0];
+        return p.tokens.items[p.cursor - 1];
+    }
+
     /// Get the string of the current
-    pub fn getTokStr(p: *Parser, tok: Token) []const u8 {
+    fn getTokStr(p: *Parser, tok: Token) []const u8 {
         return p.code[tok.start..tok.end];
     }
 
     /// Allocate the variable `obj` of type `T` on the heap and return
     pub fn heapInit(p: *Parser, comptime T: type, obj: T) !*T {
-        const o: T = try p._a.create(T);
+        const o: *T = try p._a.create(T);
         o.* = obj;
         return o;
     }
 
+    fn matchTokensWithToken(tts: []const TT, tt: TT) bool {
+        for (tts) |tt_| if (tt_ == tt) return true;
+        return false;
+    }
+
     /// Get the current location object of the node given the `start` of the token index
     ///	in the token list and then update the `p.start` variable to the current cursor
-    pub fn getLocationAdvance(p: *Parser, start: usize) !*Location {
+    pub fn getLocation(p: *Parser, start: usize) !*Location {
         const start_tok: Token = p.tokens.items[start];
-        const end_tok: Token = p.tokens.items[p.cursor];
+        const end_tok: Token = p.tokens.items[p.cursor - 1];
+        // std.debug.print("\n===\n{d}\n{d}\n===\n", .{start_tok.start, end_tok.end});
         var loc = try p.heapInit(Location, Location{
             .start = start_tok.start,
             .end = end_tok.end,
             .start_line = start_tok.start_line,
             .start_col = start_tok.start_col,
+            .end_line = end_tok.end_line,
+            .end_col = end_tok.end_col,
         });
         p.start = p.cursor;
         return loc;

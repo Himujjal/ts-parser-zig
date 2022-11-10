@@ -1,5 +1,5 @@
 {
-    "ext": "zig",
-    "watch": ["src/*.zig"],
-    "exec": "zig build test"
+    "ext": "zig,ts,json5,js",
+    "watch": ["src/**/*.zig", "tests/**/*.zig", "tests/**/*.json5", "tests/**/*.ts", "tests/**/*.js"],
+    "exec": "zig build test -freference-trace"
 }

@@ -4,8 +4,8 @@ const radix_tree = @import("radix_tree.zig");
 
 const StringRadixTree = radix_tree.StringRadixTree;
 
-pub fn concatStrings(allocator: std.mem.Allocator, string_1: []const u8, string_2: []const u8) []const u8 {
-    const result = allocator.alloc(u8, string_1.len + string_2.len) catch unreachable;
+pub fn concatStrings(allocator: std.mem.Allocator, string_1: []const u8, string_2: []const u8) std.mem.Allocator.Error![]const u8 {
+    const result = try allocator.alloc(u8, string_1.len + string_2.len);
     std.mem.copy(u8, result, string_1);
     std.mem.copy(u8, result[string_1.len..], string_2);
     return result;

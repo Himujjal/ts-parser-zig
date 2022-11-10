@@ -4,7 +4,7 @@ const token = @import("token.zig");
 
 const Allocator = std.mem.Allocator;
 
-const Token = token.TokenType;
+const Token = token.Token;
 const TokenType = token.TokenType;
 const CodeLocation = token.CodeLocation;
 
@@ -18,25 +18,43 @@ fn allocLoc(a: Allocator, loc: CodeLocation) !*CodeLocation {
     return l;
 }
 
-const Tree = struct {
+pub const Program = struct {
     loc: *CodeLocation = undefined,
-    block: *BlockBody = undefined,
+    source_type: enum { Module, Script } = .Module,
+    stmt_list_item: []const StmtListItem = undefined,
 };
 
-const BlockBody = struct {
+pub const StmtListItem = union(enum) {
+    decl: Decl,
+    stmt: Stmt,
+	raw: Raw,
+};
+
+pub const Raw = struct {
+	loc: *CodeLocation = undefined,
+	tokens: []const *Token,
+};
+
+pub const Decl = union(enum) {};
+
+pub const Block = struct {
     loc: *CodeLocation = undefined,
-    stmts: []const Statement = undefined,
+    stmts: []const Stmt = undefined,
 };
 
-const Statement = union(enum) {
-    expr_stmt: *ExpressionStmt,
+pub const Stmt = union(enum) {
+    expr_stmt: *ExprStmt,
+    empty_stmt: *EmptyStmt,
+    block_stmt: *Block,
 };
 
-const ExpressionStmt = struct {
+pub const EmptyStmt = struct { loc: *CodeLocation = undefined };
+
+pub const ExprStmt = struct {
     loc: *CodeLocation = undefined,
-    expr: Expr,
+    expr: *Expr,
 };
 
-const Expr = union(enum) {
-	
+pub const Expr = union(enum) {
+    literal: Token,
 };

@@ -9,7 +9,7 @@ const ArrayList = std.ArrayList;
 
 const TokenType = token.TokenType;
 const Token = token.Token;
-const Scanner = _scanner.Scanner; 
+const Scanner = _scanner.Scanner;
 
 const expect = std.testing.expect;
 
@@ -364,7 +364,7 @@ test "Scanner" {
         .{ .ts = "`\\\r\n`", .ttypes = &[_]TT{ .TemplateToken, .EOF }, .lexemes = &.{ "`\\\r\n`", "" } },
 
         // go fuzz
-        .{ .ts = "`", .ttypes = &[_]TT{ .TemplateToken, .EOF }, .lexemes = &.{ "`", "" } },
+        .{ .ts = "``", .ttypes = &[_]TT{ .TemplateToken, .EOF }, .lexemes = &.{ "``", "" } },
 
         // issues
         .{ .ts = "_\u{00}bare_unicode_escape_identifier", .ttypes = &[_]TT{ .IdentifierToken, .EOF }, .lexemes = &.{ "_\u{00}bare_unicode_escape_identifier", "" } }, // tdewolff/minify#449
@@ -377,7 +377,7 @@ test "Scanner" {
     scanner.* = Scanner.init(a, undefined, undefined, undefined);
     defer scanner.deinit();
 
-    const MAX = 84;
+    const MAX = 85;
     for (tokenTests) |tokenTest, i| {
         if (i <= MAX) {
             defer {
@@ -400,16 +400,21 @@ test "Scanner" {
             scanner.errors = &errors;
             scanner.warnings = &warnings;
 
-            if (i == MAX) std.debug.print("========= CODE: `{s}` ==============\n", .{tokenTest.ts});
+            const code: []const u8 = tokenTest.ts;
 
-            scanner = Scanner.scan(scanner, tokenTest.ts);
-            // if (i == MAX) scanner.printTokens();
+            if (i == MAX)
+                std.debug.print("========= CODE: `{s}` ==============\n", .{code});
+
+            scanner = Scanner.scan(scanner, code);
+
+            if (i == MAX)
+                scanner.printTokens();
 
             var flag = true;
             if (scanner.tokens.items.len == tokenTest.ttypes.len) {
                 for (scanner.tokens.items) |tok, j| {
                     if (tok.tok_type != tokenTest.ttypes[j]) {
-                        std.debug.print("NOT EQUAL TokenType: {s} == {s}\n", .{ tok.tok_type, tokenTest.ttypes[j] });
+                        std.debug.print("NOT EQUAL TokenType: {} == {}\n", .{ tok.tok_type, tokenTest.ttypes[j] });
                         flag = false;
                     }
                 }
@@ -420,9 +425,9 @@ test "Scanner" {
 
             if (scanner.tokens.items.len == tokenTest.lexemes.len) {
                 for (tokenTest.lexemes) |lexeme, j| {
-                    const _code = scanner.tokens.items[j].getCodePartOfToken();
+                    const _code = scanner.tokens.items[j].toString(code);
                     if (!std.mem.eql(u8, lexeme, _code)) {
-                        std.debug.print("NOT EQUAL: {s} == {s}\n", .{ lexeme, _code });
+                        std.debug.print("NOT EQUAL for {d}, {d}: {s} == {s}\n", .{ i, j, lexeme, _code });
                         flag = false;
                     }
                 }

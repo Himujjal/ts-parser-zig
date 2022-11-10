@@ -228,34 +228,32 @@ pub const CodeLocation = struct {
     /// end of the token in the string stream
     end: usize = 0,
 
-    start_line: usize = 0,
+    start_line: usize = 1,
     start_col: usize = 0,
+
+    end_line: usize = 1,
+    end_col: usize = 0,
 };
 
 pub const Token = struct {
-    const Self = @This();
-
     tok_type: TokenType = TokenType.EOF,
-
     /// Index of the start of the token in the array
     start: usize = 0,
-
     /// end of the token in the string stream
     end: usize = 0,
-
-    start_line: usize = 0,
+    start_line: usize = 1,
     start_col: usize = 0,
+	end_line: usize = 1,
+	end_col: usize = 0,
 
-    value: []const u8 = undefined,
-
-    pub fn toString(
+    pub fn toPrintString(
         self: *const @This(),
         allocator: Allocator,
         code: []const u8,
     ) []const u8 {
         var res: []const u8 = std.fmt.allocPrint(
             allocator,
-            "[\"{s}\", {s}, {d}, {d}]",
+            "[\"{s}\", {}, {d}, {d}]",
             .{
                 code[self.start..self.end],
                 self.tok_type,
@@ -266,11 +264,11 @@ pub const Token = struct {
         return res;
     }
 
-    pub fn getCodePartOfToken(self: *Self) []const u8 {
-        return self.value;
+    pub fn toString(t: *Token, code: []const u8) []const u8 {
+        return code[t.start..t.end];
     }
 
-    pub fn testing(self: *Self, allocator: Allocator) void {
+    pub fn testing(self: *Token, allocator: Allocator) void {
         var res: []const u8 = std.fmt.allocPrint(
             allocator,
             "({d},{d})",
