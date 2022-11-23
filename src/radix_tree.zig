@@ -7,7 +7,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const TokenType = @import("./token.zig").TokenType;
+const TokenType = @import("token.zig").TokenType;
 
 pub fn RadixTree(
     comptime K: type,

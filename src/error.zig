@@ -90,5 +90,5 @@ pub const ParserError = struct {
     start: usize,
     end: usize,
     error_type: ParserErrorType,
-	message: ?[]const u8 = null,
+    message: ?[]const u8 = null,
 };

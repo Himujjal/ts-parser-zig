@@ -35,6 +35,7 @@ const EmptyStmt = nodes.EmptyStmt;
 const Block = nodes.Block;
 const ExprStmt = nodes.ExprStmt;
 const Raw = nodes.Raw;
+const LabeledStmt = nodes.LabeledStmt;
 // const DirectivePrologue = nodes.DirectivePrologue;
 // const WSs = nodes.WSs;
 
@@ -61,7 +62,10 @@ const Raw = nodes.Raw;
 const StmtListItem = nodes.StmtListItem;
 
 const Expr = nodes.Expr;
-// const NewExpr = nodes.NewExpr;
+const UnaryExpr = nodes.UnaryExpr;
+const NewExpr = nodes.NewExpr;
+const SeqExpr = nodes.SeqExpr;
+const RegExp = nodes.RegExp;
 // const AssignmentExpr = nodes.AssignmentExpr;
 // const BinaryExpr = nodes.BinaryExpr;
 // const MemberExpr = nodes.MemberExpr;
@@ -144,6 +148,7 @@ pub const Parser = struct {
         );
 
         _ = scanner_instance.scan(code);
+		scanner_instance.printTokens();
 
         const _a = parser_arena.allocator();
 
@@ -163,8 +168,8 @@ pub const Parser = struct {
     pub fn parse(p: *Self) !Program {
         p.skipWS();
         const start = p.start;
-        const stmt_list_item = try p.parseStmtListItemUpto(&[_]TT{TT.EOF});
-        const program = Program{ .loc = try p.getLocation(start), .stmt_list_item = stmt_list_item };
+        const stmt_list_items = try p.parseStmtListItemUpto(&[_]TT{TT.EOF});
+        const program = Program{ .loc = try p.getLocation(start), .stmt_list_items = stmt_list_items };
         return program;
     }
 
@@ -178,7 +183,7 @@ pub const Parser = struct {
                 break;
             }
         }
-        return stmts.toOwnedSlice();
+        return stmts.items;
     }
 
     fn parseStmtsUpto(p: *Parser, tts: []const TT) ![]const Stmt {
@@ -207,7 +212,6 @@ pub const Parser = struct {
             TT.ClassToken => {
                 // TODO: Handle Class
             },
-
             else => {
                 const stmt = try p.parseStmt();
                 if (stmt) |_stmt| return StmtListItem{ .stmt = _stmt };
@@ -219,10 +223,102 @@ pub const Parser = struct {
 
     fn parseStmt(p: *Parser) !?Stmt {
         return switch (p.current().tok_type) {
+            // boolean
+            TT.TrueToken,
+            TT.FalseToken,
+            TT.NullToken,
+            // number like tokens
+            TT.DecimalToken,
+            TT.BinaryToken,
+            TT.OctalToken,
+            TT.OctalTokenWithoutO,
+            TT.HexadecimalToken,
+            TT.BigIntToken,
+
+            TT.StringToken,
+
+            TT.TemplateStartToken,
+            TT.TemplateToken,
+
+            TT.RegExpToken,
+            => Stmt{ .expr_stmt = try p.parseExprStmt() },
+
             TT.SemicolonToken => Stmt{ .empty_stmt = try p.parseEmptyStmt() },
-            TT.OpenBraceToken => p.parseBlock(),
-            else => null,
+            TT.OpenBraceToken => Stmt{ .block_stmt = try p.parseBlock() },
+            TT.OpenParenToken => Stmt{ .expr_stmt = try p.parseExprStmt() },
+
+            // TT.IdentifierToken => if (p.matchAsyncFunction()) Stmt{ .func_decl = try p.parseFuncDecl() } else Stmt{ .labeled_stmt = p.parseLabeledStmt() },
+            // TODO: Uncomment above
+            TT.IdentifierToken => try p.parseLabeledStmt(),
+
+            TT.BreakToken => {
+                // TODO
+                unreachable;
+            },
+            TT.ContinueToken => {
+                // TODO
+                unreachable;
+            },
+            TT.DebuggerToken => {
+                // TODO
+                unreachable;
+            },
+            TT.DoToken => {
+                // TODO
+                unreachable;
+            },
+            TT.ForToken => {
+                // TODO
+                unreachable;
+            },
+            TT.FunctionToken => {
+                // TODO
+                unreachable;
+            },
+            TT.IfToken => {
+                // TODO
+                unreachable;
+            },
+            TT.ReturnToken => {
+                // TODO
+                unreachable;
+            },
+            TT.SwitchToken => {
+                // TODO
+                unreachable;
+            },
+            TT.ThrowToken => {
+                // TODO
+                unreachable;
+            },
+            TT.TryToken => {
+                // TODO
+                unreachable;
+            },
+            TT.VarToken => {
+                // TODO
+                unreachable;
+            },
+            TT.WhileToken => {
+                // TODO
+                unreachable;
+            },
+            TT.WithToken => {
+                // TODO
+                unreachable;
+            },
+            else => Stmt{ .expr_stmt = try p.parseExprStmt() },
         };
+    }
+
+    fn parseExprStmt(p: *Parser) !*ExprStmt {
+        const start = p.cursor;
+        const expr_stmt = try p.heapInit(ExprStmt, ExprStmt{
+            .expr = try p.parseExpr(),
+        });
+        p.consumeSemicolon();
+        expr_stmt.loc = try p.getLocation(start);
+        return expr_stmt;
     }
 
     fn parseEmptyStmt(p: *Parser) !*EmptyStmt {
@@ -231,20 +327,431 @@ pub const Parser = struct {
         return try p.heapInit(EmptyStmt, EmptyStmt{ .loc = try p.getLocation(start) });
     }
 
-    fn parseBlock(p: *Parser) !?Stmt {
+    fn parseBlock(p: *Parser) !*Block {
         const start = p.start;
         p.advance();
         var stmts: ArrayList(Stmt) = ArrayList(Stmt).init(p._a);
 
         var curr_tt = p.current().tok_type;
         while (curr_tt != TT.CloseBraceToken and curr_tt != TT.EOF) {
+            // TODO: Parse block stuffs here
             curr_tt = p.advanceAndNext().tok_type;
         }
         if (curr_tt == TT.CloseBraceToken) p.advance();
-        return Stmt{ .block_stmt = try p.heapInit(Block, Block{
+        return try p.heapInit(Block, Block{
             .loc = try p.getLocation(start),
             .stmts = stmts.items,
+        });
+    }
+
+    fn parseLabeledStmt(p: *Parser) !Stmt {
+        const start = p.cursor;
+        var curr = p.current();
+
+        var expr = try p.parseExpr();
+
+        p.skipWS();
+        curr = p.current();
+        switch (expr) {
+            .identifier => {
+                if (curr.tok_type == TT.ColonToken) {
+                    // TODO: Handle this
+                    unreachable;
+                } else {
+                    p.consumeSemicolon();
+                    var expr_stmt = try p.heapInit(ExprStmt, ExprStmt{});
+                    expr_stmt.loc = try p.getLocation(start);
+                    expr_stmt.expr = expr;
+                    return Stmt{ .expr_stmt = expr_stmt };
+                }
+            },
+            else => {
+                p.consumeSemicolon();
+                var expr_stmt = try p.heapInit(ExprStmt, ExprStmt{});
+                expr_stmt.loc = try p.getLocation(start);
+                expr_stmt.expr = expr;
+                return Stmt{ .expr_stmt = expr_stmt };
+            },
+        }
+    }
+
+    fn parseExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+        var curr = p.current();
+
+        var expr = try p.parseAssignmentExpression();
+        curr = p.current();
+        p.skipWS();
+
+        var exprs = ArrayList(Expr).init(p._a);
+        if (curr.tok_type == TT.CommaToken) try exprs.append(expr);
+
+        while (curr.tok_type == TT.CommaToken) {
+            p.advance();
+            p.skipWS();
+
+            try exprs.append(try p.parseAssignmentExpression());
+
+            p.skipWS();
+            curr = p.current();
+        }
+
+        if (exprs.items.len == 0) {
+            exprs.deinit();
+            return expr;
+        }
+
+        return Expr{ .seq_expr = try p.heapInit(SeqExpr, SeqExpr{
+            .loc = try p.getLocation(start),
+            .exprs = exprs.items,
         }) };
+    }
+
+    fn parseAssignmentExpression(p: *Parser) !Expr {
+        const start = p.cursor;
+        _ = start;
+
+        // TODO: Lots of stuffs to do
+        var expr = try p.parseConditionalExpr();
+
+        switch (expr) {
+            // TODO: Handle ArrowParameterPlaceHolder
+            .identifier => {
+                return expr;
+            },
+            else => {
+                // handle '=', '*=' etc
+            },
+        }
+        return expr;
+    }
+
+    fn parseConditionalExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+        _ = start;
+
+        var expr = try p.parseLogicalOrNullish();
+        if (p.current().tok_type == TT.QuestionToken) {
+            // TODO: Handle this part
+        }
+        return expr;
+    }
+
+    fn parseLogicalOrNullish(p: *Parser) !Expr {
+        const start = p.start;
+
+        _ = start;
+
+        var expr = try p.parseLogicalAnd();
+        p.skipWS();
+
+        var curr = p.current();
+        if (curr.tok_type == TT.OrToken or curr.tok_type == TT.NullishToken) {
+            p.advance();
+            var another_expr = try p.parseLogicalOrNullish();
+            // TODO: handle another_expr
+            _ = another_expr;
+        }
+
+        return expr;
+    }
+
+    fn parseLogicalAnd(p: *Parser) !Expr {
+        const start = p.start;
+        _ = start;
+
+        var expr = try p.parseBitwiseOr();
+        p.skipWS();
+
+        var curr = p.current();
+        if (curr.tok_type == TT.AndToken) {
+            p.advance();
+            var another_expr = try p.parseLogicalAnd();
+            // TODO
+            _ = another_expr;
+        }
+        return expr;
+    }
+
+    fn parseBitwiseOr(p: *Parser) !Expr {
+        const start = p.start;
+        _ = start;
+        var expr = try p.parseBitwiseXor();
+        p.skipWS();
+        var curr = p.current();
+        if (curr.tok_type == TT.BitOrToken) {
+            p.advance();
+            var another_expr = try p.parseBitwiseOr();
+            // TODO
+            _ = another_expr;
+        }
+        return expr;
+    }
+
+    fn parseBitwiseXor(p: *Parser) !Expr {
+        const start = p.start;
+        _ = start;
+
+        var expr = try p.parseBitwiseAnd();
+        p.skipWS();
+        var curr = p.current();
+        if (curr.tok_type == TT.BitXorToken) {
+            p.advance();
+            var another_expr = try p.parseBitwiseXor();
+            // TODO
+            _ = another_expr;
+        }
+        return expr;
+    }
+
+    fn parseBitwiseAnd(p: *Parser) !Expr {
+        const start = p.start;
+        _ = start;
+
+        var expr = try p.parseEqualityExpr();
+        p.skipWS();
+        var curr = p.current();
+        if (curr.tok_type == TT.BitAndToken) {
+            p.advance();
+            var another_expr = try p.parseBitwiseAnd();
+            // TODO
+            _ = another_expr;
+        }
+        return expr;
+    }
+
+    fn parseEqualityExpr(p: *Parser) !Expr {
+        const start = p.start;
+        _ = start;
+
+        var expr = try p.parseComparisonExpr();
+        p.skipWS();
+        var tt = p.current().tok_type;
+        switch (tt) {
+            TT.EqEqToken, TT.EqEqEqToken, TT.NotEqToken, TT.NotEqEqToken => {
+                p.advance();
+                var another_expr = try p.parseEqualityExpr();
+                _ = another_expr;
+                // TODO
+            },
+            else => {},
+        }
+        return expr;
+    }
+
+    fn parseComparisonExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+        _ = start;
+        var expr = try p.parseAddSubExpr();
+        p.skipWS();
+        const tt = p.current().tok_type;
+        if (tt == TT.LtLtToken or tt == TT.GtGtToken or tt == TT.GtGtGtToken) {
+            p.advance();
+            var another_expr = try p.parseComparisonExpr();
+            _ = another_expr;
+            // TODO
+        }
+        return expr;
+    }
+
+    fn parseAddSubExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+        _ = start;
+        var expr = try p.parseMulDiv();
+        p.skipWS();
+        const tt = p.current().tok_type;
+        if (tt == TT.MulToken or tt == TT.DivToken or tt == TT.ModToken) {
+            p.advance();
+            var another_expr = try p.parseAddSubExpr();
+            _ = another_expr;
+            // TODO
+        }
+        return expr;
+    }
+
+    fn parseMulDiv(p: *Parser) !Expr {
+        const start = p.cursor;
+        _ = start;
+        var expr = try p.parseExponentiationExpr();
+        p.skipWS();
+        const tt = p.current().tok_type;
+        if (tt == TT.MulToken or tt == TT.DivToken or tt == TT.ModToken) {
+            p.advance();
+            var another_expr = try p.parseMulDiv();
+            _ = another_expr;
+            // TODO
+        }
+        return expr;
+    }
+
+    fn parseExponentiationExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+        _ = start;
+        var expr = try p.parsePrefixExpr();
+        p.skipWS();
+        const tt = p.current().tok_type;
+        if (tt == TT.ExpToken) {
+            p.advance();
+            var another_expr = try p.parseExponentiationExpr();
+            _ = another_expr;
+            // TODO
+        }
+        return expr;
+    }
+
+    fn parsePrefixExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+        const curr = p.current();
+
+        switch (curr.tok_type) {
+            TT.IdentifierToken => {
+                return try p.parsePostfixExpr();
+            },
+            TT.AwaitToken,
+            TT.DeleteToken,
+            TT.VoidToken,
+            TT.TypeofToken,
+            TT.DecrToken,
+            TT.IncrToken,
+            TT.SubToken,
+            TT.AddToken,
+            TT.BitNotToken,
+            TT.NotToken,
+            => {
+                const op = p.currentHeap();
+                p.advance();
+                return Expr{
+                    .unary_expr = try p.heapInit(UnaryExpr, UnaryExpr{
+                        .loc = try p.getLocation(start),
+                        .op = op,
+                        .expr = try p.parsePostfixExpr(),
+                    }),
+                };
+            },
+            else => {},
+        }
+
+        return try p.parsePostfixExpr();
+    }
+
+    fn parsePostfixExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+        _ = start;
+
+        var expr = try p.parseNewExpr();
+        p.skipWS();
+        const tt = p.current().tok_type;
+        if (tt == TT.IncrToken or tt == TT.DecrToken) {
+            // expr = PostFix
+        }
+        return expr;
+    }
+
+    fn parseNewExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+
+        var tt = p.current().tok_type;
+        if (tt == TT.NewToken) {
+            p.advance();
+            p.skipWS();
+            const new_expr = try p.heapInit(NewExpr, NewExpr{
+                .loc = try p.getLocation(start),
+                .expr = try p.parseNewExpr(),
+            });
+            return Expr{ .new_expr = new_expr };
+        }
+        return try p.parseFuncCallMemberExpr();
+    }
+
+    fn parseFuncCallMemberExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+        _ = start;
+
+        var expr = p.parseGroupingExpr();
+        p.skipWS();
+
+        var curr = p.current();
+
+        switch (curr.tok_type) {
+            TT.DotToken => {
+                // handle parseFuncCallMemberExpr
+            },
+            TT.OptChainToken => {
+                // handle parseFuncCallMemberExpr
+            },
+            TT.OpenBracketToken => {
+                // parseExpr
+            },
+            TT.OpenParenToken => {
+                // parseExpr
+            },
+            else => {},
+        }
+
+        return expr;
+    }
+
+    fn parseGroupingExpr(p: *Parser) !Expr {
+        const start = p.cursor;
+        _ = start;
+
+        var curr = p.current();
+
+        return switch (curr.tok_type) {
+            TT.IdentifierToken => {
+                var expr = Expr{ .identifier = p.currentHeap() };
+                p.advance();
+                return expr;
+            },
+            TT.OpenParenToken => {
+                // TODO
+                unreachable;
+            },
+            TT.DecimalToken,
+            TT.BinaryToken,
+            TT.OctalToken,
+            TT.OctalTokenWithoutO,
+            TT.HexadecimalToken,
+            TT.BigIntToken,
+            => {
+                var expr = Expr{ .literal = p.currentHeap() };
+                p.advance();
+                return expr;
+            },
+
+            TT.RegExpToken => try p.parseRegExpExpr(),
+			TT.StringToken => {
+				var expr = Expr{ .literal = p.currentHeap() };
+				p.advance();
+				return expr;
+			},
+            else => {
+                // TODO
+                unreachable;
+            },
+        };
+    }
+
+    fn parseRegExpExpr(p: *Parser) !Expr {
+		const start = p.cursor;
+        const tok_str = p.getCurrTokStr();
+
+        var flag_start = tok_str.len - 1;
+        while (tok_str[flag_start] != '/') : (flag_start -= 1) {
+			std.debug.print("{c}\n", .{tok_str[flag_start]});
+		}
+
+        var flags = tok_str[flag_start + 1 ..];
+        var pattern = tok_str[1..flag_start];
+
+        p.advance();
+
+        var reg_exp = try p.heapInit(RegExp, RegExp{
+            .loc = try p.getLocation(start),
+            .flags = flags,
+            .pattern = pattern,
+        });
+        return Expr{ .reg_exp = reg_exp };
     }
 
     fn parseRaw(p: *Self, matchers: []const TT) !Raw {
@@ -279,10 +786,26 @@ pub const Parser = struct {
         return Raw{ .loc = try p.getLocation(start), .tokens = raw_arr.items };
     }
 
+    fn matchAsyncFunction(p: *Parser) bool {
+        _ = p;
+        return false;
+    }
+
     fn skipWS(p: *Self) void {
         var tt = p.current().tok_type;
-        while (tt != TT.EOF or tt == TT.WhitespaceToken or tt == TT.CommentToken) {
-            tt = p.advanceAndNext().tok_type;
+        while (tt != TT.EOF and (tt == TT.WhitespaceToken or tt == TT.CommentToken)) {
+            p.advance();
+            tt = p.current().tok_type;
+        }
+    }
+
+    fn consumeSemicolon(p: *Parser) void {
+        p.skipWS();
+        var tt = p.current().tok_type;
+        if (tt == TT.SemicolonToken) p.advance();
+        tt = p.current().tok_type;
+        if (tt != TT.EOF or tt != TT.CloseBraceToken) {
+            // TODO: Add Error
         }
     }
 
@@ -398,15 +921,23 @@ pub const Parser = struct {
         return p.current();
     }
 
+    fn printCurrentTok(p: *Parser, num: []const u8) void {
+        std.debug.print("{s}\t==> TOKEN_TYPE: {}, string: {s}\n", .{ num, p.current().tok_type, p.getCurrTokStr() });
+    }
+
     /// Get the string value of the token under the cursor
     fn getCurrTokStr(p: *Parser) []const u8 {
         const curr = p.current();
-        return p.code[curr.start..curr.end];
+        return p.code[curr.loc.start..curr.loc.end];
     }
 
     /// Get the current token under the cursor
     fn current(p: *Parser) Token {
         return p.tokens.items[p.cursor];
+    }
+
+    fn currentHeap(p: *Parser) *Token {
+        return &p.tokens.items[p.cursor];
     }
 
     /// Look one step ahead and get the
@@ -444,12 +975,12 @@ pub const Parser = struct {
         const end_tok: Token = p.tokens.items[p.cursor - 1];
         // std.debug.print("\n===\n{d}\n{d}\n===\n", .{start_tok.start, end_tok.end});
         var loc = try p.heapInit(Location, Location{
-            .start = start_tok.start,
-            .end = end_tok.end,
-            .start_line = start_tok.start_line,
-            .start_col = start_tok.start_col,
-            .end_line = end_tok.end_line,
-            .end_col = end_tok.end_col,
+            .start = start_tok.loc.start,
+            .end = end_tok.loc.end,
+            .start_line = start_tok.loc.start_line,
+            .start_col = start_tok.loc.start_col,
+            .end_line = end_tok.loc.end_line,
+            .end_col = end_tok.loc.end_col,
         });
         p.start = p.cursor;
         return loc;

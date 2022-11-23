@@ -56,20 +56,22 @@ pub const TokenType = enum {
     CommentToken,
     CommentLineTerminatorToken,
     StringToken,
+
     TemplateToken,
     TemplateStartToken,
     TemplateMiddleToken,
     TemplateEndToken,
+
     RegExpToken,
     PrivateIdentifierToken,
 
-    /// Numeric Token Values
-    NumericToken,
-    DecimalToken,
-    BinaryToken,
-    OctalToken,
-    HexadecimalToken,
-    BigIntToken,
+    /// Number like Token Values
+    DecimalToken, // all numbers
+    BinaryToken, // binary `0b01010101`
+    OctalToken, // octal `0o134`
+    OctalTokenWithoutO, // octal `0o134`
+    HexadecimalToken, // hex `0x123`
+    BigIntToken, // `123n13`
 
     OpenBraceToken, // {
     CloseBraceToken, // }
@@ -180,25 +182,23 @@ pub const TokenType = enum {
     WithToken,
 
     // Type Token
-    ReadOnlyToken,
-    AnyToken,
-    NumberToken,
-    BooleanToken,
-    SymbolToken,
-    TypeAliasToken,
-    ConstructorToken,
-    NamespaceToken,
-    RequireToken,
-    ModuleToken,
+    ReadOnlyToken, // 'readonly'
+    AnyToken, // 'any'
+    NumberToken, // 'number'
+    BooleanToken, // 'boolean'
+    SymbolToken, // 'Symbol'
+    TypeAliasToken, // 'type'
+    ConstructorToken, // 'constructor'
+    NamespaceToken, // 'namespace'
+    RequireToken, // 'require'
+    ModuleToken, // 'module'
+    StringTypeToken, // 'string'
 
-    DeclareToken,
-    AbstractToken,
-    IsToken,
-    NullLiteralToken,
-    TrueLiteralToken,
-    FalseLiteralToken,
+    DeclareToken, // 'declare'
+    AbstractToken, // 'abstract'
+    IsToken, // 'is'
 
-    IdentifierToken,
+    IdentifierToken, // Identifier
 
     // Identifier Token
     AsToken,
@@ -219,6 +219,162 @@ pub const TokenType = enum {
     TargetToken,
 
     EOF, // "EOF"
+
+    pub fn toString(tt: TokenType) []const u8 {
+        return switch (tt) {
+            TokenType.ErrorToken => "Error",
+            TokenType.WhitespaceToken => "Whitespace",
+            TokenType.LineTerminatorToken => "LineTerminator",
+            TokenType.CommentToken => "Comment",
+            TokenType.CommentLineTerminatorToken => "CommentLineTerminator",
+            TokenType.StringToken => "String",
+            TokenType.TemplateToken => "Template",
+            TokenType.TemplateStartToken => "TemplateStart",
+            TokenType.TemplateMiddleToken => "TemplateMiddle",
+            TokenType.TemplateEndToken => "TemplateEnd",
+            TokenType.RegExpToken => "RegularExpression",
+            TokenType.PrivateIdentifierToken => "PrivateIdentifier",
+            TokenType.DecimalToken => "Numeric",
+            TokenType.BinaryToken => "Numeric",
+            TokenType.OctalToken => "Numeric",
+            TokenType.OctalTokenWithoutO => "Numeric",
+            TokenType.HexadecimalToken => "Numeric",
+            TokenType.BigIntToken => "Numeric",
+            TokenType.OpenBraceToken => "Punctuator",
+            TokenType.CloseBraceToken => "Punctuator",
+            TokenType.OpenParenToken => "Punctuator",
+            TokenType.CloseParenToken => "Punctuator",
+            TokenType.OpenBracketToken => "Punctuator",
+            TokenType.CloseBracketToken => "Punctuator",
+            TokenType.DotToken => "Dot",
+            TokenType.SemicolonToken => "Punctuator",
+            TokenType.CommaToken => "Punctuator",
+            TokenType.QuestionToken => "Question",
+            TokenType.ColonToken => "Colon",
+            TokenType.ArrowToken => "Arrow",
+            TokenType.EllipsisToken => "Ellipsis",
+            TokenType.EqToken => "Eq",
+            TokenType.EqEqToken => "EqEq",
+            TokenType.EqEqEqToken => "EqEqEq",
+            TokenType.NotToken => "Not",
+            TokenType.NotEqToken => "NotEq",
+            TokenType.NotEqEqToken => "NotEqEq",
+            TokenType.LtToken => "Lt",
+            TokenType.LtEqToken => "LtEq",
+            TokenType.LtLtToken => "LtLt",
+            TokenType.LtLtEqToken => "LtLtEq",
+            TokenType.GtToken => "Gt",
+            TokenType.GtEqToken => "GtEq",
+            TokenType.GtGtToken => "GtGt",
+            TokenType.GtGtEqToken => "GtGtEq",
+            TokenType.GtGtGtToken => "GtGtGt",
+            TokenType.GtGtGtEqToken => "GtGtGtEq",
+            TokenType.AddToken => "Add",
+            TokenType.AddEqToken => "AddEq",
+            TokenType.IncrToken => "Incr",
+            TokenType.SubToken => "Sub",
+            TokenType.SubEqToken => "SubEq",
+            TokenType.DecrToken => "Decr",
+            TokenType.MulToken => "Mul",
+            TokenType.MulEqToken => "MulEq",
+            TokenType.ExpToken => "Exp",
+            TokenType.ExpEqToken => "ExpEq",
+            TokenType.DivToken => "Div",
+            TokenType.DivEqToken => "DivEq",
+            TokenType.ModToken => "Mod",
+            TokenType.ModEqToken => "ModEq",
+            TokenType.BitAndToken => "BitAnd",
+            TokenType.BitOrToken => "BitOr",
+            TokenType.BitXorToken => "BitXor",
+            TokenType.BitNotToken => "BitNot",
+            TokenType.BitAndEqToken => "BitAndEq",
+            TokenType.BitOrEqToken => "BitOrEq",
+            TokenType.BitXorEqToken => "BitXorEq",
+            TokenType.AndToken => "And",
+            TokenType.OrToken => "Or",
+            TokenType.NullishToken => "Nullish",
+            TokenType.AndEqToken => "AndEq",
+            TokenType.OrEqToken => "OrEq",
+            TokenType.NullishEqToken => "NullishEq",
+            TokenType.OptChainToken => "OptChain",
+            TokenType.PosToken => "Pos",
+            TokenType.NegToken => "Neg",
+            TokenType.PreIncrToken => "PreIncr",
+            TokenType.PreDecrToken => "PreDecr",
+            TokenType.PostIncrToken => "PostIncr",
+            TokenType.PostDecrToken => "PostDecr",
+            TokenType.AwaitToken => "Await",
+            TokenType.BreakToken => "Break",
+            TokenType.CaseToken => "Case",
+            TokenType.CatchToken => "Catch",
+            TokenType.ClassToken => "Class",
+            TokenType.ConstToken => "Const",
+            TokenType.ContinueToken => "Continue",
+            TokenType.DebuggerToken => "Debugger",
+            TokenType.DefaultToken => "Default",
+            TokenType.DeleteToken => "Delete",
+            TokenType.DoToken => "Do",
+            TokenType.ElseToken => "Else",
+            TokenType.EnumToken => "Enum",
+            TokenType.ExportToken => "Export",
+            TokenType.ExtendsToken => "Extends",
+            TokenType.FalseToken => "False",
+            TokenType.FinallyToken => "Finally",
+            TokenType.ForToken => "For",
+            TokenType.FunctionToken => "Function",
+            TokenType.IfToken => "If",
+            TokenType.ImportToken => "Import",
+            TokenType.InToken => "In",
+            TokenType.InstanceofToken => "Instanceof",
+            TokenType.NewToken => "New",
+            TokenType.NullToken => "Null",
+            TokenType.ReturnToken => "Return",
+            TokenType.SuperToken => "Super",
+            TokenType.SwitchToken => "Switch",
+            TokenType.ThisToken => "This",
+            TokenType.ThrowToken => "Throw",
+            TokenType.TrueToken => "True",
+            TokenType.TryToken => "Try",
+            TokenType.TypeofToken => "Typeof",
+            TokenType.YieldToken => "Yield",
+            TokenType.VarToken => "Var",
+            TokenType.VoidToken => "Void",
+            TokenType.WhileToken => "While",
+            TokenType.WithToken => "With",
+            TokenType.ReadOnlyToken => "ReadOnly",
+            TokenType.AnyToken => "Any",
+            TokenType.NumberToken => "Number",
+            TokenType.BooleanToken => "Boolean",
+            TokenType.SymbolToken => "Symbol",
+            TokenType.TypeAliasToken => "TypeAlias",
+            TokenType.ConstructorToken => "Constructor",
+            TokenType.NamespaceToken => "Namespace",
+            TokenType.RequireToken => "Require",
+            TokenType.ModuleToken => "Module",
+            TokenType.StringTypeToken => "StringType",
+            TokenType.DeclareToken => "Declare",
+            TokenType.AbstractToken => "Abstract",
+            TokenType.IsToken => "Is",
+            TokenType.IdentifierToken => "Identifier",
+            TokenType.AsToken => "As",
+            TokenType.AsyncToken => "Async",
+            TokenType.FromToken => "From",
+            TokenType.GetToken => "Get",
+            TokenType.ImplementsToken => "Implements",
+            TokenType.InterfaceToken => "Interface",
+            TokenType.LetToken => "Let",
+            TokenType.MetaToken => "Meta",
+            TokenType.OfToken => "Of",
+            TokenType.PackageToken => "Package",
+            TokenType.PrivateToken => "Private",
+            TokenType.ProtectedToken => "Protected",
+            TokenType.PublicToken => "Public",
+            TokenType.SetToken => "Set",
+            TokenType.StaticToken => "Static",
+            TokenType.TargetToken => "Target",
+            else => "",
+        };
+    }
 };
 
 pub const CodeLocation = struct {
@@ -237,14 +393,7 @@ pub const CodeLocation = struct {
 
 pub const Token = struct {
     tok_type: TokenType = TokenType.EOF,
-    /// Index of the start of the token in the array
-    start: usize = 0,
-    /// end of the token in the string stream
-    end: usize = 0,
-    start_line: usize = 1,
-    start_col: usize = 0,
-	end_line: usize = 1,
-	end_col: usize = 0,
+    loc: CodeLocation = CodeLocation{},
 
     pub fn toPrintString(
         self: *const @This(),
@@ -255,10 +404,10 @@ pub const Token = struct {
             allocator,
             "[\"{s}\", {}, {d}, {d}]",
             .{
-                code[self.start..self.end],
+                code[self.loc.start..self.loc.end],
                 self.tok_type,
-                self.start,
-                self.end,
+                self.loc.start,
+                self.loc.end,
             },
         ) catch "-----------";
         return res;

@@ -20,18 +20,18 @@ const expect = std.testing.expect;
 pub fn testFile(comptime folder: []const u8, comptime file_without_ext: []const u8) !void {
     const test_name = folder ++ "/" ++ file_without_ext;
 
-    print("\n" ++ COLOR_LIGHT_VIOLET ++ "========= Running '{s}' Test ========\n" ++ COLOR_RESET, .{test_name});
+    print("\n\t" ++ COLOR_LIGHT_VIOLET ++ "========= Running '{s}' Test ========\n" ++ COLOR_RESET, .{test_name});
 
-    const source_str_json5 = @embedFile("fixtures/" ++ test_name ++ ".tree.json5");
+    const expected_tree_json5 = @embedFile("fixtures/" ++ test_name ++ ".tree.json5");
     const source_str_ts = @embedFile("fixtures/" ++ test_name ++ ".ts");
     const js_str: []const u8 = @embedFile("fixtures/" ++ test_name ++ ".js");
 
-    var json_parser: JSONParser = JSONParser.init(allocator, false);
-    defer json_parser.deinit();
-    var tree = try json_parser.parse(source_str_json5);
+    var expected_json_parser: JSONParser = JSONParser.init(allocator, false);
+    defer expected_json_parser.deinit();
+    var tree = try expected_json_parser.parse(expected_tree_json5);
     defer tree.deinit();
-    var ast_tree_json5 = try getStringifiedJSON(tree.root);
-	defer ast_tree_json5.deinit();
+    var expected_tree_json5_string = try getStringifiedJSON(tree.root);
+    defer expected_tree_json5_string.deinit();
 
     const options = TSParserOptions{};
 
@@ -39,30 +39,33 @@ pub fn testFile(comptime folder: []const u8, comptime file_without_ext: []const 
     defer p.deinit();
     const program = try p.parse();
 
-    var r = try TSRendererJSON.init(allocator, source_str_json5);
+    var r = try TSRendererJSON.init(allocator, source_str_ts);
     defer r.deinit();
-    const rendered_json = try r.render(program);
+
+    const rendered_json = try r.render(program, p.tokens.items);
+
+    std.debug.print("\n{s}\n\n{s}\n", .{rendered_json, expected_tree_json5_string.items});
 
     var json_parser_output = JSONParser.init(allocator, false);
-	defer json_parser_output.deinit();
+    defer json_parser_output.deinit();
     var output_tree: json5.ValueTree = try json_parser_output.parse(rendered_json);
-	defer output_tree.deinit();
+    defer output_tree.deinit();
 
     expect(try json5.json5Equal(allocator, output_tree.root, tree.root)) catch |err| {
-        printError(ast_tree_json5.items, rendered_json);
+        printError(expected_tree_json5_string.items, rendered_json);
         return err;
     };
 
     var output_renderer = try renderer.Renderer.init(allocator, source_str_ts);
-	defer output_renderer.deinit();
-	const rendered_js = try output_renderer.render(program);
+    defer output_renderer.deinit();
+    const rendered_js = try output_renderer.render(program);
 
-	expect(std.mem.eql(u8, rendered_js, js_str)) catch |err| {
-		printError(js_str, rendered_js);
-		return err;
-	};
+    expect(std.mem.eql(u8, rendered_js, js_str)) catch |err| {
+        printError(js_str, rendered_js);
+        return err;
+    };
 
-    print(COLOR_LIGHT_VIOLET ++ "~~~~~~~~~ '{s}' Test SUCCESSFUL! ~~~~~~~~~~\n" ++ COLOR_RESET, .{test_name});
+    print(COLOR_LIGHT_VIOLET ++ "\t~~~~~~~~~ '{s}' Test SUCCESSFUL! ~~~~~~~~~~\n" ++ COLOR_RESET, .{test_name});
 }
 
 fn getOptions(sub_test: json5.ObjectMap) TSParserOptions {
@@ -76,17 +79,34 @@ fn getOptions(sub_test: json5.ObjectMap) TSParserOptions {
     return options;
 }
 
+fn getJSONFromJSON5(json5_str: []const u8) []const u8 {
+    var expected_json_parser: JSONParser = JSONParser.init(allocator, false);
+    defer expected_json_parser.deinit();
+    var tree = try expected_json_parser.parse(json5_str);
+    defer tree.deinit();
+    var expected_tree_json5_string = try getStringifiedJSON(tree.root);
+    defer expected_tree_json5_string.deinit();
+
+    var res: []const u8 = allocator.alloc(u8, expected_tree_json5_string.items.len);
+    std.mem.copy(u8, res, expected_tree_json5_string.items);
+    return res;
+}
+
 fn printError(expected: []const u8, output: []const u8) void {
-    const ERROR = COLOR_RED ++ "\t\t!!ERROR!! " ++ COLOR_RESET;
+    const ERROR = COLOR_RED ++ "\t\t!!ERROR!!\n" ++ COLOR_RESET;
     const EXPECTED = BACK_GREEN ++ "{s}" ++ COLOR_RESET;
     const GOT = BACK_RED ++ "{s}" ++ COLOR_RESET;
-    print(ERROR ++ "EXPECTED: " ++ EXPECTED ++ " | GOT: " ++ GOT ++ "\n", .{ expected, output });
+    print(ERROR ++ "EXPECTED:\n" ++ EXPECTED ++ "\nGOT:\n" ++ GOT ++ "\n", .{ expected, output });
 }
 
 fn getStringifiedJSON(json5Value: JSONValue) !std.ArrayList(u8) {
     var arr = std.ArrayList(u8).init(allocator);
     try json5Value.json5Stringify(.{}, arr.writer());
     return arr;
+}
+
+pub fn printTestHeader(comptime str: []const u8) void {
+    std.debug.print("\n" ++ COLOR_LIGHT_BLUE ++ "======= '{s}' tests ========" ++ COLOR_RESET, .{str});
 }
 
 const COLOR_RED = "\x1b[31m";

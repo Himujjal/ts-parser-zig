@@ -14,6 +14,8 @@ const DigitType = token.DigitType;
 const Error = _error.ParserError;
 const ParserErrorType = _error.ParserErrorType;
 
+const CodeLocation = token.CodeLocation;
+
 const getTokenTypeFromString = token.getTokenTypeFromString;
 const getOpTokens = token.getOpTokens;
 const getOpEqTokens = token.getOpEqTokens;
@@ -233,9 +235,13 @@ pub const Scanner = struct {
                 if (tt != .ErrorToken) {
                     return tt;
                 } else {
-                    tt = s.consumeOperatorToken();
-                    if (tt != .ErrorToken) {
-                        return tt;
+                    if (s.consumeRegExpToken()) {
+						return .RegExpToken;
+					} else {
+                        tt = s.consumeOperatorToken();
+                        if (tt != .ErrorToken) {
+                            return tt;
+                        }
                     }
                 }
             },
@@ -654,9 +660,11 @@ pub const Scanner = struct {
                 s.advance();
                 return .BigIntToken;
             } else if ('0' <= s.current() and s.current() <= '9') {
-                s.addError("legacy octal numbers are not supported");
+                // s.addError("legacy octal numbers are not supported");
                 while ((s.consumeDigit()) or (s.consumeNumericSeparator(DigitType.Digit))) {}
-                return .ErrorToken;
+                if (s.current() != '.') {
+                    return .OctalTokenWithoutO;
+                }
             }
         } else if (first != '.') {
             while ((s.consumeDigit()) or (s.consumeNumericSeparator(DigitType.Digit))) {}
@@ -783,16 +791,12 @@ pub const Scanner = struct {
                 // const len = sl.len;
                 s.templateLevels = ArrayList(usize).fromOwnedSlice(s.internal_allocator, sl[0..(sl.len - 1)]);
                 s.advance();
-                if (continuation) {
-                    return .TemplateEndToken;
-                }
+                if (continuation) return .TemplateEndToken;
                 return .TemplateToken;
             } else if (c == '$' and s.lookAhead() == '{') {
                 s.level += 1;
                 s.move(2);
-                if (continuation) {
-                    return .TemplateMiddleToken;
-                }
+                if (continuation) return .TemplateMiddleToken;
                 return .TemplateStartToken;
             } else if (c == '\\') {
                 s.advance();
@@ -806,9 +810,7 @@ pub const Scanner = struct {
                     s.advance();
                     continue;
                 }
-                if (continuation) {
-                    return .TemplateEndToken;
-                }
+                if (continuation) return .TemplateEndToken;
                 return .TemplateToken;
             }
             s.advance();
@@ -833,14 +835,17 @@ pub const Scanner = struct {
     }
 
     fn addTok(s: *Scanner, tok_type: TokenType, start_pos: usize, end_pos: usize) void {
-        s.tokens.append(Token{
+        const loc = CodeLocation{
             .start = start_pos + s.raw_text_offset,
             .end = end_pos + s.raw_text_offset,
+            .start_line = s.start_line,
+            .end_line = s.end_line,
+            .start_col = s.start_col,
+            .end_col = s.end_col,
+        };
+        s.tokens.append(Token{
             .tok_type = tok_type,
-			.start_line = s.start_line,
-			.end_line = s.end_line,
-			.start_col = s.start_col,
-			.end_col = s.end_col,
+            .loc = loc,
         }) catch unreachable;
     }
 
@@ -977,8 +982,8 @@ pub const Scanner = struct {
             s.end_line += 1;
             s.end_col = 0;
         } else {
-			s.end_col += 1;
-		}
+            s.end_col += 1;
+        }
         s.cursor += 1;
     }
 
@@ -1026,7 +1031,8 @@ pub const Scanner = struct {
     pub fn printTokens(p: *Scanner) void {
         std.debug.print("========= TOKENS ===========\nToken length: {d}\n", .{p.tokens.items.len});
         for (p.tokens.items) |tok| {
-            std.debug.print("{s}\n", .{tok.toPrintString(p.internal_allocator, p.code)});
+            const t: Token = tok;
+            std.debug.print("{s}\n", .{t.toPrintString(p.internal_allocator, p.code)});
         }
         std.debug.print("====================\n", .{});
     }

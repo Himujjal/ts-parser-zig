@@ -2772,9 +2772,12 @@ fn jsonValueEqual(allocator: Allocator, a: Value, b: Value) !bool {
             .NumberString => |b_ns| std.mem.eql(u8, a_ns, b_ns),
             else => false,
         },
-        .String => |a_s| switch (b) {
-            .String => |b_s| {
-                return std.mem.eql(u8, a_s, b_s);
+        .String => switch (b) {
+            .String => {
+                return std.mem.eql(u8,
+					try getStringifiedJSON(allocator, a),
+					try getStringifiedJSON(allocator, b),
+				);
             },
             else => false,
         },
@@ -2792,10 +2795,8 @@ fn jsonValueEqual(allocator: Allocator, a: Value, b: Value) !bool {
         .Object => |a_o| switch (b) {
             .Object => |b_o| {
                 if (a_o.count() != b_o.count()) return false;
-
                 const b_o_keys = b_o.keys();
                 const a_o_keys = a_o.keys();
-
                 for (a_o_keys) |a_o_k| {
                     var b_o_k: ?[]const u8 = null;
                     for (b_o_keys) |v| {
@@ -2804,7 +2805,6 @@ fn jsonValueEqual(allocator: Allocator, a: Value, b: Value) !bool {
                             break;
                         }
                     }
-
                     if (b_o_k == null) return false;
 
                     const a_o_v = a_o.get(a_o_k).?;
