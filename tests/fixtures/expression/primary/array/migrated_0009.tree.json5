@@ -11,7 +11,7 @@
                     "name": "T‌",
                     "range": [
                         0,
-                        2
+                        7
                     ],
                     "loc": {
                         "start": {
@@ -20,7 +20,7 @@
                         },
                         "end": {
                             "line": 1,
-                            "column": 2
+                            "column": 7
                         }
                     }
                 },
@@ -28,23 +28,23 @@
                     "type": "ArrayExpression",
                     "elements": [],
                     "range": [
-                        5,
-                        7
+                        10,
+                        12
                     ],
                     "loc": {
                         "start": {
                             "line": 1,
-                            "column": 5
+                            "column": 10
                         },
                         "end": {
                             "line": 1,
-                            "column": 7
+                            "column": 12
                         }
                     }
                 },
                 "range": [
                     0,
-                    7
+                    12
                 ],
                 "loc": {
                     "start": {
@@ -53,13 +53,13 @@
                     },
                     "end": {
                         "line": 1,
-                        "column": 7
+                        "column": 12
                     }
                 }
             },
             "range": [
                 0,
-                7
+                12
             ],
             "loc": {
                 "start": {
@@ -68,7 +68,7 @@
                 },
                 "end": {
                     "line": 1,
-                    "column": 7
+                    "column": 12
                 }
             }
         }
@@ -80,7 +80,7 @@
             "value": "T‌",
             "range": [
                 0,
-                2
+                7
             ],
             "loc": {
                 "start": {
@@ -89,7 +89,7 @@
                 },
                 "end": {
                     "line": 1,
-                    "column": 2
+                    "column": 7
                 }
             }
         },
@@ -97,17 +97,17 @@
             "type": "Punctuator",
             "value": "=",
             "range": [
-                3,
-                4
+                8,
+                9
             ],
             "loc": {
                 "start": {
                     "line": 1,
-                    "column": 3
+                    "column": 8
                 },
                 "end": {
                     "line": 1,
-                    "column": 4
+                    "column": 9
                 }
             }
         },
@@ -115,17 +115,17 @@
             "type": "Punctuator",
             "value": "[",
             "range": [
-                5,
-                6
+                10,
+                11
             ],
             "loc": {
                 "start": {
                     "line": 1,
-                    "column": 5
+                    "column": 10
                 },
                 "end": {
                     "line": 1,
-                    "column": 6
+                    "column": 11
                 }
             }
         },
@@ -133,24 +133,24 @@
             "type": "Punctuator",
             "value": "]",
             "range": [
-                6,
-                7
+                11,
+                12
             ],
             "loc": {
                 "start": {
                     "line": 1,
-                    "column": 6
+                    "column": 11
                 },
                 "end": {
                     "line": 1,
-                    "column": 7
+                    "column": 12
                 }
             }
         }
     ],
     "range": [
         0,
-        7
+        12
     ],
     "loc": {
         "start": {
@@ -159,7 +159,7 @@
         },
         "end": {
             "line": 1,
-            "column": 7
+            "column": 12
         }
     }
 }

@@ -30,12 +30,23 @@ const SeqExpr = nodes.SeqExpr;
 const UnaryExpr = nodes.UnaryExpr;
 const NewExpr = nodes.NewExpr;
 const RegExp = nodes.RegExp;
+const AssignmentExpr = nodes.AssignmentExpr;
+const ArrayExpr = nodes.ArrayExpr;
+const ArrayExprElement = nodes.ArrayExprElement;
+
+const VarDeclarator = nodes.VarDeclarator;
+const VarDecl = nodes.VarDecl;
+const VarDeclKind = nodes.VarDeclKind;
+
+const SpreadElement = nodes.SpreadElement;
+
+const ArrowFunc = nodes.ArrowFunc;
 
 const CodeLocation = token.CodeLocation;
 // -----------------------------------------
 
 const AllocPrintError = std.fmt.AllocPrintError;
-const AllocatorError = Allocator.Error;
+const Err = Allocator.Error;
 
 pub const RendererJSON = struct {
     code: []const u8 = undefined,
@@ -91,8 +102,8 @@ pub const RendererJSON = struct {
                         .{
                             tok.tok_type.toString(),
                             try r.renderToken(&tok),
-                            try r.renderRange(&tok.loc),
-                            try r.renderLoc(&tok.loc),
+                            try r.renderRange(tok.loc),
+                            try r.renderLoc(tok.loc),
                         },
                     ),
                 );
@@ -135,12 +146,49 @@ pub const RendererJSON = struct {
             },
             .block_stmt => |block_stmt| try r.renderBlock(block_stmt),
             .labeled_stmt => |labeled_stmt| try r.renderLabeledStmt(labeled_stmt),
+            .var_stmt => |var_stmt| try r.renderVarStmt(var_stmt),
         };
     }
 
-    pub fn renderLabeledStmt(r: *RendererJSON, labeled_stmt: *LabeledStmt) (AllocatorError || AllocPrintError)![]const u8 {
+    pub fn renderVarStmt(r: *RendererJSON, var_stmt: *VarDecl) Err![]const u8 {
+        var decl_str: []const u8 = "";
+        for (var_stmt.decls) |decl, i| {
+            decl_str = try r.concat(decl_str, try r.renderVarDeclaration(decl));
+            if (i != var_stmt.decls.len - 1) decl_str = try r.concat(decl_str, ",");
+        }
+
+        return try r.format(
+            "{{\"type\":\"VariableDeclaration\",\"declarations\":[{s}],\"kind\":\"{s}\",\"range\":{s},\"loc\":{s}}}",
+            .{ decl_str, RendererJSON.renderVarDeclKind(var_stmt.kind), try r.renderRange(var_stmt.loc), try r.renderLoc(var_stmt.loc) },
+        );
+    }
+
+    pub fn renderVarDeclaration(r: *RendererJSON, var_decl: VarDeclarator) Err![]const u8 {
+        return try r.format(
+            "{{\"type\":\"VariableDeclarator\",\"id\":{s},\"init\":{s},\"range\":{s},\"loc\":{s}}}",
+            .{
+                switch (var_decl.id) {
+                    .binding_identifier => |bi| try r.renderIdentifier(&bi),
+                    .binding_pattern => |_| "", // TODO: Render this later
+                },
+                if (var_decl.init) |initializer| try r.renderExpr(initializer) else "null",
+                try r.renderRange(var_decl.loc),
+                try r.renderLoc(var_decl.loc),
+            },
+        );
+    }
+
+    fn renderVarDeclKind(var_decl_kind: VarDeclKind) []const u8 {
+        return switch (var_decl_kind) {
+            .Var => "var",
+            .Const => "const",
+            .Let => "let",
+        };
+    }
+
+    pub fn renderLabeledStmt(r: *RendererJSON, labeled_stmt: *LabeledStmt) Err![]const u8 {
         var identifier = try r.format("{{\"type\":\"Identifier\",\"range\":{s}}}", .{try r.renderRange(
-            &labeled_stmt.label.loc,
+            labeled_stmt.label.loc,
         )});
         var res: []const u8 = try r.format("{{ \"type\":\"LabeledStatement\",\"label\":{s},\"body\":{s},\"range\":{s},\"loc\":{s}}}", .{
             identifier,
@@ -167,32 +215,105 @@ pub const RendererJSON = struct {
             .identifier => |id| r.renderIdentifier(id),
             .literal => |l| r.renderLiteral(l),
             .reg_exp => |reg_exp| r.renderRegExp(reg_exp),
+
+            .assignment_expr => |ae| r.renderAssignmentExpr(ae),
+
+            .arr_expr => |are| r.renderArrayExpr(are),
+            .arrow_func => |ar_func| r.renderArrowFunc(ar_func),
         };
     }
 
-    pub fn renderSeqExpr(r: *RendererJSON, s: *SeqExpr) ![]const u8 {
-        var res: []const u8 = "{\"type\":\"SequenceExpression\",\"expressions\":[";
-
-        for (s.exprs) |expr, i| {
-            res = try r.concat(res, try r.renderExpr(expr));
-            if (i != s.exprs.len - 1) res = try r.concat(res, ",");
-        }
-        res = try r.concat(
-            res,
-            try r.format("],\"range\":{s},\"loc\":{s}}}", .{ try r.renderRange(s.loc), try r.renderLoc(s.loc) }),
+    pub fn renderAssignmentExpr(r: *RendererJSON, ae: *AssignmentExpr) ![]const u8 {
+        return try r.format(
+            "{{\"type\":\"AssignmentExpression\",\"operator\":\"=\",\"left\":{s},\"right\":{s},{s}}}",
+            .{ try r.renderExpr(ae.left_expr), try r.renderExpr(ae.right_expr), try r.renderRangeAndLoc(ae.loc) },
         );
-        return res;
     }
 
-    pub fn renderIdentifier(r: *RendererJSON, id: *Token) AllocPrintError![]const u8 {
+    /// renders: `"range":[1,0],"loc":{"start"}`
+    pub fn renderRangeAndLoc(r: *RendererJSON, loc: *CodeLocation) ![]const u8 {
+        return try r.format("\"range\":{s},\"loc\":{s}", .{ try r.renderRange(loc), try r.renderLoc(loc) });
+    }
+
+    pub fn renderArrowFunc(r: *RendererJSON, af: *ArrowFunc) ![]const u8 {
+        var params_str: []const u8 = switch (af.args) {
+            .identifier => |identifier| try r.format("[{s}]", .{try r.renderIdentifier(identifier)}),
+            .seq_expr => |seq_expr| try r.renderSeqExprSubArray(seq_expr.exprs),
+            else => "",
+        };
+
+        var body_str = switch (af.body.*) {
+            .block => |block| try r.renderBlock(block),
+            .expr => |expr| try r.renderExpr(expr),
+        };
+
+        return try r.format(
+            "{{\"type\":\"ArrowFunctionExpression\",\"id\":{s},\"params\":{s},\"body\":{s},\"generator\":{},\"expression\":{},\"async\":{},{s}}}",
+            .{ "null", params_str, body_str, af.generator, af.expression, af._async, try r.renderRangeAndLoc(af.loc) },
+        );
+    }
+
+    pub fn renderArrayExpr(r: *RendererJSON, arr: *ArrayExpr) ![]const u8 {
+        var elements_str: []const u8 = "";
+        for (arr.elements) |element, i| {
+            if (element) |e| {
+                std.debug.print("element:{s}\n", .{try r.renderArrayExprElement(e)});
+                elements_str = try r.concat(elements_str, try r.renderArrayExprElement(e));
+            } else {
+                std.debug.print("element: {any}\n", .{element});
+                elements_str = try r.concat(elements_str, "null");
+            }
+            if (i != arr.elements.len - 1) elements_str = try r.concat(elements_str, ",");
+        }
+
+        return try r.format(
+            "{{\"type\":\"ArrayExpression\",\"elements\":[{s}],{s}}}",
+            .{ elements_str, try r.renderRangeAndLoc(arr.loc) },
+        );
+    }
+
+    pub fn renderArrayExprElement(r: *RendererJSON, arr: ArrayExprElement) ![]const u8 {
+        return switch (arr) {
+            .expr => |e| r.renderExpr(e),
+            .spread_element => |s| r.renderSpreadElement(s),
+        };
+    }
+
+    pub fn renderSpreadElement(r: *RendererJSON, se: *SpreadElement) ![]const u8 {
+        // TODO: Complete this
+        _ = r;
+        _ = se;
+        return "";
+    }
+
+    pub fn renderSeqExpr(r: *RendererJSON, s: *SeqExpr) ![]const u8 {
+        return try r.format(
+            "{{\"type\":\"SequenceExpression\",\"expressions\":{s},{s}}}",
+            .{ try r.renderSeqExprSubArray(s.exprs), try r.renderRangeAndLoc(s.loc) },
+        );
+    }
+
+    fn renderSeqExprSubArray(r: *RendererJSON, exprs: []const ?Expr) ![]const u8 {
+        var res: []const u8 = "[";
+        for (exprs) |expr, i| {
+            if (expr) |_expr| {
+                res = try r.concat(res, try r.renderExpr(_expr));
+                if (i != exprs.len - 1) res = try r.concat(res, ",");
+            }
+        }
+        return try r.concat(res, "]");
+    }
+
+    pub fn renderIdentifier(r: *RendererJSON, id: *const Token) AllocPrintError![]const u8 {
+        const tok_str: []const u8 = try r.renderToken(id);
         return try r.format(
             "{{\"type\":\"Identifier\",\"name\":\"{s}\",\"range\":{s},\"loc\":{s}}}",
-            .{ try r.renderToken(id), try r.renderRange(&id.loc), try r.renderLoc(&id.loc) },
+            .{ tok_str, try r.renderRange(id.loc), try r.renderLoc(id.loc) },
         );
     }
 
     pub fn renderLiteral(r: *RendererJSON, l: *Token) AllocPrintError![]const u8 {
-        var value: []const u8 = try r.renderStrWithLoc(&l.loc);
+        var value: []const u8 = try r.renderStrWithLoc(l.loc);
         switch (l.tok_type) {
             TT.HexadecimalToken,
             TT.DecimalToken,
@@ -201,25 +322,37 @@ pub const RendererJSON = struct {
                 value = try r.format("{d}", .{res});
                 return try r.format(
                     "{{\"type\":\"Literal\",\"value\":{s},\"raw\":\"{s}\",\"range\":{s},\"loc\":{s}}}",
-                    .{ value, try r.renderToken(l), try r.renderRange(&l.loc), try r.renderLoc(&l.loc) },
+                    .{ value, try r.renderToken(l), try r.renderRange(l.loc), try r.renderLoc(l.loc) },
                 );
             },
             TT.BinaryToken,
-            TT.OctalToken,
             TT.BigIntToken,
             => {},
-            TT.OctalTokenWithoutO => {
-                var res: u32 = std.fmt.parseInt(u32, value, 8) catch 0;
+            TT.OctalToken => {
+                std.debug.print(">> {s}, {d}\n", .{ try r.renderToken(l), l.loc.end });
+                var res: u32 = std.fmt.parseInt(u32, value, 0) catch 0;
                 value = try r.format("{d}", .{res});
                 return try r.format(
                     "{{\"type\":\"Literal\",\"value\":{s},\"raw\":\"{s}\",\"range\":{s},\"loc\":{s}}}",
-                    .{ value, try r.renderToken(l), try r.renderRange(&l.loc), try r.renderLoc(&l.loc) },
+                    .{ value, try r.renderToken(l), try r.renderRange(l.loc), try r.renderLoc(l.loc) },
+                );
+            },
+            TT.OctalTokenWithoutO => {
+                var first_index: usize = 0;
+                if (value[0] == '0') {
+                    while (value[first_index] == '0') : (first_index += 1) {}
+                }
+                var res: f64 = std.fmt.parseFloat(f64, value[first_index..value.len]) catch 0;
+                value = try r.format("{d}", .{res});
+                return try r.format(
+                    "{{\"type\":\"Literal\",\"value\":{s},\"raw\":\"{s}\",\"range\":{s},\"loc\":{s}}}",
+                    .{ value, try r.renderToken(l), try r.renderRange(l.loc), try r.renderLoc(l.loc) },
                 );
             },
             TT.StringToken => {
                 return try r.format(
                     "{{\"type\":\"Literal\",\"value\":{s},\"raw\":\"{s}\",\"range\":{s},\"loc\":{s}}}",
-                    .{ value, try r.renderToken(l), try r.renderRange(&l.loc), try r.renderLoc(&l.loc) },
+                    .{ value, try r.renderToken(l), try r.renderRange(l.loc), try r.renderLoc(l.loc) },
                 );
             },
             else => {},
@@ -259,12 +392,13 @@ pub const RendererJSON = struct {
         const s = r.code[t.loc.start..t.loc.end];
         return switch (t.tok_type) {
             TT.StringToken => try r.renderRawString(s),
+            TT.IdentifierToken => try utils.renderStringDecodedUnicode(r._a, s),
             else => s,
         };
     }
 
     // TODO
-    pub fn renderRawString(r: *RendererJSON, s: []const u8) AllocatorError![]const u8 {
+    pub fn renderRawString(r: *RendererJSON, s: []const u8) Err![]const u8 {
         var arr = ArrayList(u8).init(r._a);
         const quote = s[0];
         if (quote == '\'') {
@@ -274,8 +408,8 @@ pub const RendererJSON = struct {
             try arr.append('"');
         }
 
-		var i: usize = 1;
-        while (i < s.len - 1): (i += 1) {
+        var i: usize = 1;
+        while (i < s.len - 1) : (i += 1) {
             try arr.append(s[i]);
         }
 

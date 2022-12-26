@@ -28,7 +28,10 @@ pub fn testFile(comptime folder: []const u8, comptime file_without_ext: []const 
 
     var expected_json_parser: JSONParser = JSONParser.init(allocator, false);
     defer expected_json_parser.deinit();
-    var tree = try expected_json_parser.parse(expected_tree_json5);
+    var tree = expected_json_parser.parse(expected_tree_json5) catch |json_err| {
+        std.debug.print("1. JSON Parse Error: {}\n, File: {s}\n", .{ json_err, test_name ++ ".tree.json5" });
+        return json_err;
+    };
     defer tree.deinit();
     var expected_tree_json5_string = try getStringifiedJSON(tree.root);
     defer expected_tree_json5_string.deinit();
@@ -44,11 +47,14 @@ pub fn testFile(comptime folder: []const u8, comptime file_without_ext: []const 
 
     const rendered_json = try r.render(program, p.tokens.items);
 
-    std.debug.print("\n{s}\n\n{s}\n", .{rendered_json, expected_tree_json5_string.items});
+    // std.debug.print("\n{s}\n\n{s}\n", .{rendered_json, expected_tree_json5_string.items});
 
     var json_parser_output = JSONParser.init(allocator, false);
     defer json_parser_output.deinit();
-    var output_tree: json5.ValueTree = try json_parser_output.parse(rendered_json);
+    var output_tree: json5.ValueTree = json_parser_output.parse(rendered_json) catch |json_err| {
+        std.debug.print("2. JSON Parse Error: {}\n{s}\n", .{ json_err, rendered_json });
+        return json_err;
+    };
     defer output_tree.deinit();
 
     expect(try json5.json5Equal(allocator, output_tree.root, tree.root)) catch |err| {

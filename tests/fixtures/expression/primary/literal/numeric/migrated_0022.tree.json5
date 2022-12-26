@@ -5,7 +5,7 @@
             "type": "ExpressionStatement",
             "expression": {
                 "type": "Literal",
-                "value": 0,
+                "value": 8,
                 "raw": "0008",
                 "range": [
                     0,

@@ -6,7 +6,7 @@
             "expression": {
                 "type": "Literal",
                 "value": 10,
-                "raw": "0012",
+                "raw": "0o12",
                 "range": [
                     0,
                     4
@@ -42,7 +42,7 @@
     "tokens": [
         {
             "type": "Numeric",
-            "value": "0012",
+            "value": "0o12",
             "range": [
                 0,
                 4

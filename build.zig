@@ -16,14 +16,13 @@ pub fn build(b: *std.build.Builder) void {
 
     const test_step = b.step("test", "Run library tests");
 
-    // const main_tests = b.addTest("src/lib.zig");
-    // main_tests.setBuildMode(mode);
-    // test_step.dependOn(&main_tests.step);
+    const main_tests = b.addTest("src/lib.zig");
+    main_tests.setBuildMode(mode);
+    test_step.dependOn(&main_tests.step);
 
-    const json_tests = b.addTest("tests/test_main.zig");
-    json_tests.main_pkg_path = ".";
-    json_tests.addIncludePath("src");
-    json_tests.setBuildMode(mode);
-
-    test_step.dependOn(&json_tests.step);
+    // const json_tests = b.addTest("tests/test_main.zig");
+    // json_tests.main_pkg_path = ".";
+    // json_tests.addIncludePath("src");
+    // json_tests.setBuildMode(mode);
+    // test_step.dependOn(&json_tests.step);
 }

@@ -562,7 +562,7 @@ pub const StreamingParser = struct {
                 },
                 'n' => {
                     const last_type = p.stack.peek() orelse return error.TooManyClosingItems;
-                    if (last_type == .object or p.after_string_state == .ObjectSeparator) {
+                    if (last_type == .object) {
                         p.state = .Identifier;
                     } else {
                         p.state = .NullLiteral1;
@@ -734,7 +734,9 @@ pub const StreamingParser = struct {
                     token.* = .{ .String = .{ .count = p.count, .escapes = StringEscapes.None } };
                 },
                 else => {
-                    if (!identifierTable[c]) return error.InvalidIdentifier;
+                    if (!identifierTable[c]) {
+                        return error.InvalidIdentifier;
+                    }
                 },
             },
 
@@ -2772,12 +2774,9 @@ fn jsonValueEqual(allocator: Allocator, a: Value, b: Value) !bool {
             .NumberString => |b_ns| std.mem.eql(u8, a_ns, b_ns),
             else => false,
         },
-        .String => switch (b) {
-            .String => {
-                return std.mem.eql(u8,
-					try getStringifiedJSON(allocator, a),
-					try getStringifiedJSON(allocator, b),
-				);
+        .String => |a_s| switch (b) {
+            .String => |b_s| {
+                return std.mem.eql(u8, a_s, b_s);
             },
             else => false,
         },

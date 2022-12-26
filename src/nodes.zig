@@ -36,7 +36,96 @@ pub const Raw = struct {
 };
 
 pub const Decl = union(enum) {
-    async_func: AsyncFuncDecl,
+    async_func: *AsyncFuncDecl,
+    var_decl: *VarDecl,
+};
+
+pub const VarDecl = struct {
+    loc: *CodeLocation = undefined,
+    decls: []const VarDeclarator = undefined,
+    kind: VarDeclKind = .Var,
+};
+
+pub const VarDeclKind = enum { Var, Const, Let };
+
+pub const VarDeclarator = struct {
+    loc: *CodeLocation = undefined,
+    id: BindingPatternIdentifier = undefined,
+	init: ?Expr = null,
+};
+
+pub const BindingPatternIdentifier = union(enum) {
+    binding_identifier: BindingIdentifier,
+    binding_pattern: BindingPattern,
+};
+
+pub const BindingIdentifier = Token;
+
+pub const BindingPattern = union(enum) {
+    array_pattern: *ArrayPattern,
+    object_pattern: *ObjectPattern,
+};
+
+pub const ArrayPattern = struct {
+    loc: *CodeLocation = undefined,
+    elements: []const ?ArrayPatternElement,
+};
+
+pub const ArrayPatternElement = union(enum) {
+    assignment_pattern: *AssignmentPattern,
+    binding_identifier: BindingIdentifier,
+	binding_pattern: BindingPattern,
+	rest_element: *RestElement,
+};
+
+pub const ObjectPattern = struct {
+    loc: *CodeLocation = undefined,
+    properties: []const ObjectPatternProperty,
+};
+
+pub const ObjectPatternProperty = union(enum) {
+    property: *Property,
+    rest_element: *RestElement,
+};
+
+pub const Property = struct {
+    loc: *CodeLocation = undefined,
+    key: *PropertyKey = undefined,
+    computed: bool = false,
+    value: ?PropertyValue = null,
+    // kind: []const u8 = undefined, // TODO: Look into this later
+    method: bool = false,
+    shorthand: bool = false,
+};
+
+pub const PropertyKey = union(enum) {
+    identifier: *Token,
+    literal: *Token,
+};
+
+pub const PropertyValue = union(enum) {
+    assignment_pattern: *AssignmentPattern,
+    // async_func_expr: *AsyncFunctionExpression, // TODO: Implement this later
+    binding_identifier: BindingIdentifier,
+    binding_pattern: BindingPattern,
+    // func_expr: *FunctionExpression, // TODO: Implement this later
+};
+
+pub const PatternWithDefault = union(enum) {
+    assignment_pattern: *AssignmentPattern,
+    binding_identifier: BindingIdentifier,
+    binding_pattern: BindingPattern,
+};
+
+pub const AssignmentPattern = struct {
+    loc: *CodeLocation = undefined,
+    left: BindingPatternIdentifier = undefined,
+    right: Expr = undefined,
+};
+
+pub const RestElement = struct {
+    loc: *CodeLocation = undefined,
+    arg: BindingPatternIdentifier,
 };
 
 pub const AsyncFuncDecl = struct {
@@ -53,6 +142,7 @@ pub const Stmt = union(enum) {
     empty_stmt: *EmptyStmt,
     block_stmt: *Block,
     labeled_stmt: *LabeledStmt,
+    var_stmt: *VarDecl,
 };
 
 pub const EmptyStmt = struct { loc: *CodeLocation = undefined };
@@ -64,38 +154,77 @@ pub const ExprStmt = struct {
 
 pub const LabeledStmt = struct {
     loc: *CodeLocation = undefined,
-	label: Token = undefined, // Identifier
-	body: Stmt = undefined,
+    label: Token = undefined, // Identifier
+    body: Stmt = undefined,
 };
 
 pub const Expr = union(enum) {
-	seq_expr: *SeqExpr,
-	unary_expr: *UnaryExpr,
-	new_expr: *NewExpr,
+    seq_expr: *SeqExpr,
+    unary_expr: *UnaryExpr,
+    new_expr: *NewExpr,
 
     identifier: *Token,
-	literal: *Token,
-	reg_exp: *RegExp,
+    literal: *Token,
+    reg_exp: *RegExp,
+
+    assignment_expr: *AssignmentExpr,
+    arr_expr: *ArrayExpr,
+    arrow_func: *ArrowFunc,
+};
+
+pub const ArrayExpr = struct {
+    loc: *CodeLocation,
+    elements: []const ?ArrayExprElement,
+};
+
+pub const AssignmentExpr = struct {
+    loc: *CodeLocation,
+    left_expr: Expr,
+    right_expr: Expr,
+};
+
+pub const ArrowFunc = struct {
+    loc: *CodeLocation = undefined,
+    args: Expr = undefined,
+    body: *ArrowFuncBody = undefined,
+    generator: bool = false,
+    expression: bool = false,
+    _async: bool = false,
+};
+
+pub const ArrowFuncBody = union(enum) {
+    block: *Block,
+    expr: Expr,
 };
 
 pub const UnaryExpr = struct {
-	loc: *CodeLocation = undefined,
-	op: *Token,
-	expr: Expr,
+    loc: *CodeLocation = undefined,
+    op: *Token,
+    expr: Expr,
 };
 
 pub const SeqExpr = struct {
-	loc: *CodeLocation = undefined,
-	exprs: []const Expr,
+    loc: *CodeLocation = undefined,
+    exprs: []const ?Expr,
 };
 
 pub const NewExpr = struct {
-	loc: *CodeLocation = undefined,
-	expr: Expr,
+    loc: *CodeLocation = undefined,
+    expr: Expr,
 };
 
 pub const RegExp = struct {
-	loc: *CodeLocation = undefined,
-	pattern: []const u8 = undefined, 
-	flags: []const u8 = undefined,
+    loc: *CodeLocation = undefined,
+    pattern: []const u8 = undefined,
+    flags: []const u8 = undefined,
+};
+
+pub const ArrayExprElement = union(enum) {
+    expr: Expr,
+    spread_element: *SpreadElement,
+};
+
+pub const SpreadElement = struct {
+    loc: *CodeLocation = undefined,
+    arg: Expr,
 };

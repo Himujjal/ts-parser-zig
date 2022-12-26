@@ -41,7 +41,10 @@ test "Expression Tests" {
 test "Expression > Primary > Array" {
     test_utils.printTestHeader("Expression > primary > literal > array");
     comptime var i: usize = 0;
-    inline while (i < 1) : (i += 1) {}
+    inline while (i < 13) : (i += 1) {
+		const num = try comptime getNum(i);
+        try testFile("primary/array", "migrated_00" ++ num);
+	}
 }
 
 fn testFile(comptime folder: []const u8, comptime file: []const u8) !void {

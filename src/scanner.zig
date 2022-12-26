@@ -1,6 +1,7 @@
 const std = @import("std");
 const expect = std.testing.expect;
 
+const utils = @import("utils.zig");
 const token = @import("token.zig");
 const parser = @import("parser.zig");
 const _error = @import("error.zig");
@@ -31,12 +32,15 @@ const LineTermUnicode = token.LineTermUnicode;
 
 const RuneStruct = struct { r: u21, n: u8 };
 
+const Err = std.mem.Allocator.Error;
+
 fn isIdentifierStart(byte: u21) bool {
     for (unicodeESNextIdentifierStart) |uni| {
         if (uni == byte) return true;
     }
     return false;
 }
+
 fn isIdentifierContinue(byte: u21) bool {
     for (unicodeESNextIdentifierPart) |uni| {
         if (uni == byte) return true;
@@ -47,11 +51,14 @@ fn isIdentifierContinue(byte: u21) bool {
 // IsIdentifierStart returns true if the byte-slice start is the start of an identifier
 fn isIdentifierStartBytes(bytes: []const u8) bool {
     var r = std.unicode.Utf8View.init(bytes) catch return false;
-    const b = r.iterator(r).nextCodepoint();
-    const _first = b == '$' or b == '\\' or b == '_';
-    if (_first) return true;
-    for (unicodeESNextIdentifierStart) |uni| {
-        if (uni == b) return true;
+    var iter = r.iterator();
+    var code_point = iter.nextCodepoint();
+    if (code_point) |b| {
+        const _first = b == '$' or b == '\\' or b == '_';
+        if (_first) return true;
+        for (unicodeESNextIdentifierStart) |uni| {
+            if (uni == b) return true;
+        }
     }
     return false;
 }
@@ -165,7 +172,7 @@ pub const Scanner = struct {
             s.start_line = s.end_line;
             s.start_col = s.end_col;
         }
-        s.addTok(TokenType.EOF, s.code.len - 1, s.code.len - 1);
+        s.addTok(TokenType.EOF, s.code.len - 1, s.code.len - 1) catch unreachable;
         return s;
     }
 
@@ -178,6 +185,13 @@ pub const Scanner = struct {
         s.prevNumericLiteral = false;
 
         const c = s.current();
+
+        if (isWhiteSpace(c)) {
+            s.advance();
+            while (s.consumeWhitespace()) {}
+            s.prevLineTerminator = prevLineTerminator;
+            return .WhitespaceToken;
+        }
 
         switch (c) {
             ' ', '\t' => {
@@ -236,8 +250,8 @@ pub const Scanner = struct {
                     return tt;
                 } else {
                     if (s.consumeRegExpToken()) {
-						return .RegExpToken;
-					} else {
+                        return .RegExpToken;
+                    } else {
                         tt = s.consumeOperatorToken();
                         if (tt != .ErrorToken) {
                             return tt;
@@ -324,12 +338,6 @@ pub const Scanner = struct {
             },
         }
         const c2 = s.peekRune();
-        // s.move(c2.n) catch |e| {
-        //     if (e == ParserErrorType.EOFError) {
-        //         return .ErrorToken;
-        //     }
-        // };
-        // s.start = s.cursor;
         s.addError(std.fmt.allocPrint(
             s.internal_allocator,
             "unexpected character: {x}",
@@ -388,9 +396,13 @@ pub const Scanner = struct {
         return false;
     }
 
+    fn isHextDigit(c: u8) bool {
+        return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
+    }
+
     fn consumeHexDigit(s: *Scanner) bool {
         const c = s.current();
-        if ((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F')) {
+        if (Scanner.isHextDigit(c)) {
             s.advance();
             return true;
         }
@@ -415,42 +427,15 @@ pub const Scanner = struct {
         return false;
     }
 
-    fn consumeUnicodeEscape(s: *Scanner) bool {
+    fn consumeNonHexEscape(s: *Scanner) bool {
         var c = s.current();
-        if (c != '\\' or s.lookAhead() != 'u') {
-            if (c == '\\') {
-                if (s.cursor != s.code.len - 1) {
-                    s.move(2);
-                }
-            }
-            return false;
-        }
-        // const mark = s.getMark();
-        s.move(2);
-        c = s.current();
-        if (c == '{') {
-            s.advance();
-            if (s.consumeHexDigit()) {
-                while (s.consumeHexDigit()) {}
-                c = s.current();
-                if (c == '}') {
-                    s.advance();
-                    return true;
-                }
-            }
-            if (s.current() == '}') {
-                s.advance();
-            }
-            // s.rewind(mark);
-            return false;
-        } else {
-            if (!(s.consumeHexDigit()) or !(s.consumeHexDigit()) or !(s.consumeHexDigit()) or !(s.consumeHexDigit())) {
-                if (s.consumeIdentifierToken()) {}
-                // s.rewind(mark);
-                return false;
+        if (c == '\\' or s.lookAhead() != 'u') {
+            if (s.cursor != s.code.len - 1) {
+                s.move(2);
+                return true;
             }
         }
-        return true;
+        return false;
     }
 
     fn consumeSingleLineComment(s: *Scanner) void {
@@ -526,7 +511,10 @@ pub const Scanner = struct {
     fn consumeOperatorToken(s: *Scanner) TokenType {
         var c = s.current();
         s.advance();
-        if (s.current() == '=') {
+        if (c == '/' and s.current() == '=') {
+            s.advance();
+            return .DivEqToken;
+        } else if (s.current() == '=') {
             s.advance();
             if (s.current() == '=' and (c == '!' or c == '=')) {
                 s.advance();
@@ -563,13 +551,65 @@ pub const Scanner = struct {
                 return .GtGtEqToken;
             }
             return .GtGtToken;
+        } else if (c == '<' and s.current() == '=') {
+            s.advance();
+            return .LtEqToken;
+        } else if (c == '>' and s.current() == '=') {
+            s.advance();
+            return .GtEqToken;
         }
         return getOpTokens(c);
     }
 
-    // TODO: Fix this function. Including the Unicode part
+    fn consumeUnicodeEscape(s: *Scanner) bool {
+        var c = s.current();
+        if (c != '\\' or s.lookAhead() != 'u') {
+            if (c == '\\') {
+                if (s.cursor != s.code.len - 1) {
+                    s.move(2);
+                }
+            }
+            return false;
+        }
+        // const mark = s.getMark();
+        s.move(2);
+        c = s.current();
+        if (c == '{') {
+            s.advance();
+            if (s.consumeHexDigit()) {
+                while (s.consumeHexDigit()) {}
+                c = s.current();
+                if (c == '}') {
+                    s.advance();
+                    return true;
+                }
+            }
+            if (s.current() == '}') {
+                s.advance();
+            }
+            // s.rewind(mark);
+            return false;
+        } else {
+			if (s.cursor + 3 >= s.code.len - 1) {
+				while (s.cursor <= s.code.len - 1) {
+					s.advance();
+				}
+				return false;
+			}
+
+            if (!(s.consumeHexDigit() and s.consumeHexDigit() and s.consumeHexDigit() and s.consumeHexDigit())) {
+                if (s.consumeIdentifierToken()) {}
+                // s.rewind(mark);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Consuming Identifier
     fn consumeIdentifierToken(s: *Scanner) bool {
         var c = s.current();
+
         if (identifierStartTable[c]) {
             s.advance();
         } else if (0xC0 <= c) {
@@ -582,6 +622,8 @@ pub const Scanner = struct {
         } else if (!(s.consumeUnicodeEscape())) {
             return false;
         }
+
+        c = s.current();
         while (true) {
             c = s.current();
             if (identifierTable[c]) {
@@ -594,6 +636,7 @@ pub const Scanner = struct {
                     break;
                 }
             } else if (!(s.consumeUnicodeEscape())) {
+                c = s.current();
                 if (c == 0 and !s.end()) {
                     s.advance();
                     continue;
@@ -628,7 +671,7 @@ pub const Scanner = struct {
         const first = s.current();
         if (first == '0') {
             s.advance();
-            const c = s.current();
+            var c = s.current();
             if (c == 'x' or c == 'X') {
                 s.advance();
                 if (s.consumeHexDigit()) {
@@ -659,12 +702,23 @@ pub const Scanner = struct {
             } else if (c == 'n') {
                 s.advance();
                 return .BigIntToken;
-            } else if ('0' <= s.current() and s.current() <= '9') {
-                // s.addError("legacy octal numbers are not supported");
+            } else if (c == '8' or c == '9') {
+                // Special Cases
+                const tt = s.consumeNumericToken();
+                if (tt == TokenType.DecimalToken) return TokenType.OctalTokenWithoutO;
+                return TokenType.ErrorToken;
+            } else if (c == '0') {
+                while (c == '0') : (c = s.current()) s.advance();
+                const tt = s.consumeNumericToken();
+                if (tt == TokenType.DecimalToken) return TokenType.OctalTokenWithoutO;
+                return TokenType.ErrorToken;
+            } else if ('0' <= c and c <= '9') {
+                s.addError("legacy octal numbers are not supported");
                 while ((s.consumeDigit()) or (s.consumeNumericSeparator(DigitType.Digit))) {}
-                if (s.current() != '.') {
-                    return .OctalTokenWithoutO;
-                }
+                // if (s.current() != '.') {
+                //     return .OctalTokenWithoutO;
+                // }
+                return .ErrorToken;
             }
         } else if (first != '.') {
             while ((s.consumeDigit()) or (s.consumeNumericSeparator(DigitType.Digit))) {}
@@ -737,6 +791,7 @@ pub const Scanner = struct {
     }
 
     fn consumeRegExpToken(s: *Scanner) bool {
+        const mark = s.cursor;
         // assume to be on /
         s.advance();
         var inClass = false;
@@ -752,9 +807,14 @@ pub const Scanner = struct {
             } else if (c == '\\') {
                 s.advance();
                 if (s.isLineTerminator() or s.current() == 0 and s.errors.items.len == 0) {
+                    s.cursor = mark;
                     return false;
                 }
             } else if (s.isLineTerminator() or c == 0 and s.errors.items.len == 0) {
+                s.cursor = mark;
+                return false;
+            } else if (isWhiteSpace(c)) {
+                s.cursor = mark;
                 return false;
             }
             s.advance();
@@ -834,19 +894,19 @@ pub const Scanner = struct {
         s.code = old_code;
     }
 
-    fn addTok(s: *Scanner, tok_type: TokenType, start_pos: usize, end_pos: usize) void {
-        const loc = CodeLocation{
+    fn addTok(s: *Scanner, tok_type: TokenType, start_pos: usize, end_pos: usize) Err!void {
+        const loc = try s.heapInit(CodeLocation{
             .start = start_pos + s.raw_text_offset,
             .end = end_pos + s.raw_text_offset,
             .start_line = s.start_line,
             .end_line = s.end_line,
             .start_col = s.start_col,
             .end_col = s.end_col,
-        };
-        s.tokens.append(Token{
+        });
+        try s.tokens.append(Token{
             .tok_type = tok_type,
             .loc = loc,
-        }) catch unreachable;
+        });
     }
 
     fn parseRawText(s: *Scanner) void {
@@ -948,8 +1008,13 @@ pub const Scanner = struct {
     }
 
     fn move(p: *Scanner, n: i32) void {
-        const newPos = @intCast(usize, @intCast(i32, p.cursor) + n);
-        p.cursor = newPos;
+        if (n >= 0) {
+            var i: i32 = 0;
+            while (i < n) : (i += 1) p.advance();
+        } else {
+            const newPos = @intCast(usize, @intCast(i32, p.cursor) + n);
+            p.cursor = newPos;
+        }
     }
 
     fn current(s: *Scanner) u8 {
@@ -1000,7 +1065,7 @@ pub const Scanner = struct {
     }
 
     pub fn addToken(s: *Scanner, tok_type: TokenType) void {
-        s.addTok(tok_type, s.start, s.cursor);
+        s.addTok(tok_type, s.start, s.cursor) catch unreachable;
     }
 
     pub fn addError(s: *Scanner, message: []const u8) void {
@@ -1035,6 +1100,13 @@ pub const Scanner = struct {
             std.debug.print("{s}\n", .{t.toPrintString(p.internal_allocator, p.code)});
         }
         std.debug.print("====================\n", .{});
+    }
+
+    pub fn heapInit(s: *Scanner, obj: anytype) Err!*@TypeOf(obj) {
+        const T = @TypeOf(obj);
+        const o: *T = try s.internal_allocator.create(T);
+        o.* = obj;
+        return o;
     }
 
     pub fn deinitInternal(s: *Scanner) void {

@@ -26,7 +26,12 @@ const ParserErrorType = _error.ParserErrorType;
 pub const ParserOptions = struct {
     is_jsx_enabled: bool = true,
     is_ts_enabled: bool = false,
+    strict: bool = true,
+    is_module: bool = true,
+    allow_yield: bool = true,
 };
+
+const Err = std.mem.Allocator.Error;
 
 // ------ Nodes --------
 const Program = nodes.Program;
@@ -41,7 +46,7 @@ const LabeledStmt = nodes.LabeledStmt;
 
 // const ExportStmt = nodes.ExportStmt;
 // const ImportStmt = nodes.ImportStmt;
-// const VarDeclStmt = nodes.VarDeclStmt;
+const VarDecl = nodes.VarDecl;
 // const FunctionDecl = nodes.FunctionDecl;
 // const ClassDecl = nodes.ClassDecl;
 
@@ -66,7 +71,10 @@ const UnaryExpr = nodes.UnaryExpr;
 const NewExpr = nodes.NewExpr;
 const SeqExpr = nodes.SeqExpr;
 const RegExp = nodes.RegExp;
-// const AssignmentExpr = nodes.AssignmentExpr;
+
+const ArrowFunc = nodes.ArrowFunc;
+const ArrowFuncBody = nodes.ArrowFuncBody;
+const AssignmentExpr = nodes.AssignmentExpr;
 // const BinaryExpr = nodes.BinaryExpr;
 // const MemberExpr = nodes.MemberExpr;
 // const GroupExpr = nodes.GroupExpr;
@@ -81,10 +89,16 @@ const RegExp = nodes.RegExp;
 // const ConditionExpr = nodes.ConditionExpr;
 // const YieldExpr = nodes.YieldExpr;
 // const VariableDecl = nodes.VariableDecl;
-// const AssignmentPattern = nodes.AssignmentPattern;
-// const ObjectPattern = nodes.ObjectPattern;
-// const ObjectPatternProperty = nodes.ObjectPatternProperty;
-// const BindingPattern = nodes.BindingPattern;
+const AssignmentPattern = nodes.AssignmentPattern;
+const ObjectPattern = nodes.ObjectPattern;
+const ObjectPatternProperty = nodes.ObjectPatternProperty;
+const BindingPattern = nodes.BindingPattern;
+const BindingIdentifier = nodes.BindingIdentifier;
+const BindingPatternIdentifier = nodes.BindingPatternIdentifier;
+const PatternWithDefault = nodes.PatternWithDefault;
+
+const VarDeclKind = nodes.VarDeclKind;
+const VarDeclarator = nodes.VarDeclarator;
 
 // const TokenIndex = usize;
 
@@ -94,18 +108,21 @@ const RegExp = nodes.RegExp;
 // const ArgumentListElement = nodes.ArgumentListElement;
 // const Arguments = nodes.Arguments;
 
-// const Property = nodes.Property;
-// const PropertyKey = nodes.PropertyKey;
-// const PropertyValue = nodes.PropertyValue;
+const Property = nodes.Property;
+const PropertyKey = nodes.PropertyKey;
+const PropertyValue = nodes.PropertyValue;
 // const PropertyKind = nodes.PropertyKind;
 // const Params = nodes.Params;
-// const SpreadElement = nodes.SpreadElement;
+const SpreadElement = nodes.SpreadElement;
 // const ObjectExprProperty = nodes.ObjectExprProperty;
-// const RestElement = nodes.RestElement;
+const RestElement = nodes.RestElement;
 // const TemplateLiteral = nodes.TemplateLiteral;
 // const Pattern = nodes.Pattern;
-// const ArrayPattern = nodes.ArrayPattern;
-// const ArrayPatternElement = nodes.ArrayPatternElement;
+const ArrayPattern = nodes.ArrayPattern;
+const ArrayPatternElement = nodes.ArrayPatternElement;
+
+const ArrayExprElement = nodes.ArrayExprElement;
+const ArrayExpr = nodes.ArrayExpr;
 
 // --------------------
 
@@ -148,7 +165,7 @@ pub const Parser = struct {
         );
 
         _ = scanner_instance.scan(code);
-		scanner_instance.printTokens();
+        scanner_instance.printTokens();
 
         const _a = parser_arena.allocator();
 
@@ -199,18 +216,27 @@ pub const Parser = struct {
         switch (tok.tok_type) {
             TT.ExportToken => {
                 // TODO: handle export
+                unreachable;
             },
             TT.ImportToken => {
                 // TODO: Handle Import
+                unreachable;
             },
-            TT.ConstToken, TT.LetToken, TT.VarToken => {
-                // TODO: Handle Var declaration
+            TT.ConstToken => {
+                // TODO: Handle Const declaration
+                unreachable;
+            },
+            TT.LetToken => {
+                // TODO: Handle Let declaration
+                unreachable;
             },
             TT.FunctionToken => {
                 // TODO: Function
+                unreachable;
             },
             TT.ClassToken => {
                 // TODO: Handle Class
+                unreachable;
             },
             else => {
                 const stmt = try p.parseStmt();
@@ -295,10 +321,7 @@ pub const Parser = struct {
                 // TODO
                 unreachable;
             },
-            TT.VarToken => {
-                // TODO
-                unreachable;
-            },
+            TT.VarToken => Stmt{ .var_stmt = try p.parseVarStmt() },
             TT.WhileToken => {
                 // TODO
                 unreachable;
@@ -313,7 +336,7 @@ pub const Parser = struct {
 
     fn parseExprStmt(p: *Parser) !*ExprStmt {
         const start = p.cursor;
-        const expr_stmt = try p.heapInit(ExprStmt, ExprStmt{
+        const expr_stmt = try p.heapInit(ExprStmt{
             .expr = try p.parseExpr(),
         });
         p.consumeSemicolon();
@@ -324,7 +347,229 @@ pub const Parser = struct {
     fn parseEmptyStmt(p: *Parser) !*EmptyStmt {
         const start = p.start;
         p.advance();
-        return try p.heapInit(EmptyStmt, EmptyStmt{ .loc = try p.getLocation(start) });
+        return try p.heapInit(EmptyStmt{ .loc = try p.getLocation(start) });
+    }
+
+    fn parseVarStmt(p: *Parser) Err!*VarDecl {
+        const start = p.cursor;
+        _ = p.eat(TT.VarToken, null);
+        p.advanceWS();
+        var var_decls = try p.parseVarDeclList(false);
+        return try p.heapInit(VarDecl{ .loc = try p.getLocation(start), .decls = var_decls, .kind = .Var });
+    }
+
+    fn parseVarDeclList(p: *Parser, in_for: bool) ![]const VarDeclarator {
+        var decls = ArrayList(VarDeclarator).init(p._a);
+        try decls.append(try p.parseVarDeclaration(in_for));
+        var curr_tt = p.current().tok_type;
+        p.advanceWS();
+
+        while (curr_tt == TT.CommaToken) : (curr_tt = p.current().tok_type) {
+            p.advanceWS();
+            try decls.append(try p.parseVarDeclaration(in_for));
+        }
+        return decls.items;
+    }
+
+    fn parseVarDeclaration(p: *Parser, in_for: bool) Err!VarDeclarator {
+        const start = p.cursor;
+
+        var params: ArrayList(Token) = ArrayList(Token).init(p._a);
+        const id = try p.parsePattern(VarDeclKind.Var, &params);
+
+        if (p.options.strict) {
+            switch (id) {
+                .binding_identifier => |bi| {
+                    if (bi.tok_type != TT.IdentifierToken) {
+                        // TODO: Error
+                    }
+                },
+                else => {},
+            }
+        }
+
+        p.advanceWS();
+
+        var initializer: ?Expr = null;
+        if (p.current().tok_type == TT.EqToken) {
+            p.advanceWS();
+            initializer = try p.parseAssignmentExpression();
+        } else if (!in_for) {
+            switch (id) {
+                .binding_identifier => {},
+                else => {
+                    _ = p.eat(TT.EqToken, null);
+                },
+            }
+        }
+
+        return VarDeclarator{
+            .loc = try p.getLocation(start),
+            .id = id,
+            .init = initializer,
+        };
+    }
+
+    fn parsePattern(p: *Parser, kind: VarDeclKind, params: *ArrayList(Token)) Err!BindingPatternIdentifier {
+        var curr = p.current();
+        if (curr.tok_type == TT.OpenBracketToken) { // '['
+            const array_pattern = try p.parseArrayPattern(params, kind);
+            return BindingPatternIdentifier{
+                .binding_pattern = BindingPattern{ .array_pattern = array_pattern },
+            };
+        } else if (curr.tok_type == TT.OpenBraceToken) { // '{'
+            const object_pattern = try p.parseObjectPattern(params, kind);
+            return BindingPatternIdentifier{
+                .binding_pattern = BindingPattern{ .object_pattern = object_pattern },
+            };
+        }
+        if (curr.tok_type == TT.LetToken and (kind == .Const or kind == .Let)) {
+            // TODO: Tolerate Unexpected Error when let is a pattern
+        }
+        try params.append(curr);
+        return BindingPatternIdentifier{ .binding_identifier = curr };
+    }
+
+    fn parseArrayPattern(p: *Parser, params: *ArrayList(Token), kind: VarDeclKind) Err!*ArrayPattern {
+        const start = p.cursor;
+        _ = p.eat(TT.OpenBracketToken, null);
+        var elements = ArrayList(?ArrayPatternElement).init(p._a);
+
+        var curr = p.current();
+        while (curr.tok_type != TT.CloseBracketToken) { // ']'
+            if (curr.tok_type == TT.CommaToken) {
+                p.advanceWS();
+                try elements.append(null);
+                curr = p.current();
+                continue;
+            } else if (curr.tok_type == TT.EllipsisToken) { // '...'
+                try elements.append(ArrayPatternElement{
+                    .rest_element = try p.parseBindingRestElement(params, kind),
+                });
+            } else {
+                const pattern_with_default = try p.parsePatternWithDefault(params, kind);
+                try elements.append(switch (pattern_with_default) {
+                    .assignment_pattern => |ap| ArrayPatternElement{ .assignment_pattern = ap },
+                    .binding_identifier => |bi| ArrayPatternElement{ .binding_identifier = bi },
+                    .binding_pattern => |bp| ArrayPatternElement{ .binding_pattern = bp },
+                });
+            }
+
+            p.skipWS();
+            if (p.current().tok_type == TT.CommaToken) p.advanceWS();
+            curr = p.current();
+        }
+
+        _ = p.eat(TT.CloseBracketToken, null);
+
+        if (elements.items.len > 0) {
+            if (elements.items[elements.items.len - 1] == null) {
+                _ = elements.pop();
+            }
+        }
+
+        p.advance();
+
+        return try p.heapInit(ArrayPattern{
+            .loc = try p.getLocation(start),
+            .elements = elements.items,
+        });
+    }
+
+    fn parsePatternWithDefault(p: *Parser, params: *ArrayList(Token), kind: VarDeclKind) Err!PatternWithDefault {
+        const start = p.cursor;
+        const pattern = try p.parsePattern(kind, params);
+
+        if (p.match(TT.EqToken)) {
+            p.advance();
+            const prev_allow_yield = p.options.allow_yield;
+            p.options.allow_yield = true;
+            const right = try p.parseAssignmentExpression();
+            p.options.allow_yield = prev_allow_yield;
+            return PatternWithDefault{ .assignment_pattern = try p.heapInit(AssignmentPattern{
+                .loc = try p.getLocation(start),
+                .right = right,
+                .left = pattern,
+            }) };
+        }
+
+        return switch (pattern) {
+            .binding_identifier => |bi| PatternWithDefault{ .binding_identifier = bi },
+            .binding_pattern => |bp| PatternWithDefault{ .binding_pattern = bp },
+        };
+    }
+
+    fn parseBindingRestElement(p: *Parser, params: *ArrayList(Token), kind: VarDeclKind) Err!*RestElement {
+        const start = p.cursor;
+        _ = p.eat(TT.EllipsisToken, null);
+        const pattern = try p.parsePattern(kind, params);
+        return try p.heapInit(RestElement{
+            .loc = try p.getLocation(start),
+            .arg = pattern,
+        });
+    }
+
+    fn parseObjectPattern(p: *Parser, params: *ArrayList(Token), kind: VarDeclKind) Err!*ObjectPattern {
+        const start = p.cursor;
+        var properties = ArrayList(ObjectPatternProperty).init(p._a);
+        _ = p.eat(TT.OpenBraceToken, null);
+
+        var curr = p.current();
+        while (curr.tok_type != TT.CloseBraceToken) {
+            if (curr.tok_type == TT.EllipsisToken) {
+                try properties.append(ObjectPatternProperty{ .rest_element = try p.parseRestProperty(params) });
+            } else {
+                try properties.append(ObjectPatternProperty{ .property = try p.parsePropertyPattern(params, kind) });
+            }
+            p.skipWS();
+            if (p.current().tok_type == TT.CommaToken) p.advanceWS();
+            curr = p.current();
+        }
+
+        return try p.heapInit(ObjectPattern{
+            .loc = try p.getLocation(start),
+            .properties = properties.items,
+        });
+    }
+
+    fn parseRestProperty(p: *Parser, params: *ArrayList(Token)) Err!*RestElement {
+        const start = p.cursor;
+        _ = p.eat(TT.EllipsisToken, null);
+        const arg = try p.parsePattern(.Var, params);
+        if (p.match(TT.EqToken)) {
+            // TODO: Throw default rest property
+        }
+        return try p.heapInit(RestElement{ .loc = try p.getLocation(start), .arg = arg });
+    }
+
+    fn parsePropertyPattern(p: *Parser, params: *ArrayList(Token), kind: VarDeclKind) Err!*Property {
+        const start = p.cursor;
+        _ = params;
+        _ = kind;
+        // TODO: Implement this
+        return try p.heapInit(Property{
+            .loc = try p.getLocation(start),
+        });
+    }
+
+    fn parseVarIdentifier(p: *Parser, kind: VarDeclKind) Err!Token {
+        const tok = p.current();
+
+        if (tok.tok_type == TT.YieldToken) {
+            if (p.options.strict) {
+                // TODO; tolerate unexpected Token
+            } else if (!p.options.allow_yield) {
+                // throw error
+            }
+        } else if (tok.tok_type != TT.IdentifierToken) {
+            // TODO: handle error
+            if (p.options.strict or tok.tok_type == TT.LetToken or kind != .Var) {
+                // throw error
+            }
+        } else if ((p.options.is_module) and tok.tok_type == TT.AsyncToken) {
+            // TOOD: Handle error
+        }
+        return tok;
     }
 
     fn parseBlock(p: *Parser) !*Block {
@@ -338,7 +583,7 @@ pub const Parser = struct {
             curr_tt = p.advanceAndNext().tok_type;
         }
         if (curr_tt == TT.CloseBraceToken) p.advance();
-        return try p.heapInit(Block, Block{
+        return try p.heapInit(Block{
             .loc = try p.getLocation(start),
             .stmts = stmts.items,
         });
@@ -359,7 +604,7 @@ pub const Parser = struct {
                     unreachable;
                 } else {
                     p.consumeSemicolon();
-                    var expr_stmt = try p.heapInit(ExprStmt, ExprStmt{});
+                    var expr_stmt = try p.heapInit(ExprStmt{});
                     expr_stmt.loc = try p.getLocation(start);
                     expr_stmt.expr = expr;
                     return Stmt{ .expr_stmt = expr_stmt };
@@ -367,7 +612,7 @@ pub const Parser = struct {
             },
             else => {
                 p.consumeSemicolon();
-                var expr_stmt = try p.heapInit(ExprStmt, ExprStmt{});
+                var expr_stmt = try p.heapInit(ExprStmt{});
                 expr_stmt.loc = try p.getLocation(start);
                 expr_stmt.expr = expr;
                 return Stmt{ .expr_stmt = expr_stmt };
@@ -375,7 +620,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseExpr(p: *Parser) !Expr {
+    fn parseExpr(p: *Parser) Err!Expr {
         const start = p.cursor;
         var curr = p.current();
 
@@ -383,7 +628,7 @@ pub const Parser = struct {
         curr = p.current();
         p.skipWS();
 
-        var exprs = ArrayList(Expr).init(p._a);
+        var exprs = ArrayList(?Expr).init(p._a);
         if (curr.tok_type == TT.CommaToken) try exprs.append(expr);
 
         while (curr.tok_type == TT.CommaToken) {
@@ -401,29 +646,52 @@ pub const Parser = struct {
             return expr;
         }
 
-        return Expr{ .seq_expr = try p.heapInit(SeqExpr, SeqExpr{
+        return Expr{ .seq_expr = try p.heapInit(SeqExpr{
             .loc = try p.getLocation(start),
             .exprs = exprs.items,
         }) };
     }
 
-    fn parseAssignmentExpression(p: *Parser) !Expr {
+    fn parseAssignmentExpression(p: *Parser) Err!Expr {
         const start = p.cursor;
-        _ = start;
 
         // TODO: Lots of stuffs to do
-        var expr = try p.parseConditionalExpr();
+        var left_expr = try p.parseConditionalExpr();
+        p.skipWS();
 
-        switch (expr) {
-            // TODO: Handle ArrowParameterPlaceHolder
-            .identifier => {
-                return expr;
-            },
-            else => {
-                // handle '=', '*=' etc
-            },
+        var curr = p.current();
+        if (curr.tok_type == TT.EqToken) {
+            p.advance();
+            p.skipWS();
+
+            curr = p.current();
+
+            switch (left_expr) {
+                .identifier => {
+                    // TODO: If variable name is not a keyword or restricted word in strict mode
+                    var right_expr = try p.parseConditionalExpr();
+                    return Expr{
+                        .assignment_expr = try p.heapInit(AssignmentExpr{
+                            .loc = try p.getLocation(start),
+                            .left_expr = left_expr,
+                            .right_expr = right_expr,
+                        }),
+                    };
+                },
+                else => {
+                    const right_expr = try p.parseAssignmentExpression();
+                    return Expr{
+                        .assignment_expr = try p.heapInit(AssignmentExpr{
+                            .loc = try p.getLocation(start),
+                            .left_expr = left_expr,
+                            .right_expr = right_expr,
+                        }),
+                    };
+                },
+            }
         }
-        return expr;
+
+        return left_expr;
     }
 
     fn parseConditionalExpr(p: *Parser) !Expr {
@@ -621,7 +889,7 @@ pub const Parser = struct {
                 const op = p.currentHeap();
                 p.advance();
                 return Expr{
-                    .unary_expr = try p.heapInit(UnaryExpr, UnaryExpr{
+                    .unary_expr = try p.heapInit(UnaryExpr{
                         .loc = try p.getLocation(start),
                         .op = op,
                         .expr = try p.parsePostfixExpr(),
@@ -654,7 +922,7 @@ pub const Parser = struct {
         if (tt == TT.NewToken) {
             p.advance();
             p.skipWS();
-            const new_expr = try p.heapInit(NewExpr, NewExpr{
+            const new_expr = try p.heapInit(NewExpr{
                 .loc = try p.getLocation(start),
                 .expr = try p.parseNewExpr(),
             });
@@ -693,19 +961,71 @@ pub const Parser = struct {
 
     fn parseGroupingExpr(p: *Parser) !Expr {
         const start = p.cursor;
-        _ = start;
-
         var curr = p.current();
 
         return switch (curr.tok_type) {
             TT.IdentifierToken => {
-                var expr = Expr{ .identifier = p.currentHeap() };
+                const identifier_expr = Expr{ .identifier = p.currentHeap() };
                 p.advance();
-                return expr;
+                p.skipWS();
+                curr = p.current();
+
+                if (curr.tok_type == TT.ArrowToken) {
+                    p.advance();
+                    p.skipWS();
+                    curr = p.current();
+
+                    var arrow_func_body: ArrowFuncBody = undefined;
+                    if (curr.tok_type == TT.OpenBraceToken) {
+                        arrow_func_body = ArrowFuncBody{ .block = try p.parseBlock() };
+                    } else {
+                        arrow_func_body = ArrowFuncBody{ .expr = try p.parseExpr() };
+                    }
+                    return Expr{
+                        .arrow_func = try p.heapInit(ArrowFunc{
+                            .loc = try p.getLocation(start),
+                            .args = identifier_expr,
+                            .body = try p.heapInit(arrow_func_body),
+                        }),
+                    };
+                } else {
+                    return identifier_expr;
+                }
             },
             TT.OpenParenToken => {
-                // TODO
-                unreachable;
+                var exprs = try p.parseExpr();
+                curr = p.current();
+
+                if (curr.tok_type == TT.CloseParenToken) {
+                    p.advance();
+                    p.skipWS();
+                    curr = p.current();
+
+                    if (curr.tok_type == TT.ArrowToken) {
+                        p.advance();
+                        p.skipWS();
+                        curr = p.current();
+
+                        var arrow_func_body: ArrowFuncBody = undefined;
+                        if (curr.tok_type == TT.OpenBraceToken) {
+                            arrow_func_body = ArrowFuncBody{ .block = try p.parseBlock() };
+                        } else {
+                            arrow_func_body = ArrowFuncBody{ .expr = try p.parseExpr() };
+                        }
+                        return Expr{
+                            .arrow_func = try p.heapInit(ArrowFunc{
+                                .loc = try p.getLocation(start),
+                                .args = exprs,
+                                .body = try p.heapInit(arrow_func_body),
+                            }),
+                        };
+                    } else {
+                        return exprs;
+                    }
+                } else {
+                    // TODO: handle error
+                    unreachable;
+                }
             },
             TT.DecimalToken,
             TT.BinaryToken,
@@ -719,12 +1039,17 @@ pub const Parser = struct {
                 return expr;
             },
 
+            TT.OpenBracketToken => { // '['
+                var expr = try p.parseArrayInitializer();
+                return expr;
+            },
+
             TT.RegExpToken => try p.parseRegExpExpr(),
-			TT.StringToken => {
-				var expr = Expr{ .literal = p.currentHeap() };
-				p.advance();
-				return expr;
-			},
+            TT.StringToken => {
+                var expr = Expr{ .literal = p.currentHeap() };
+                p.advance();
+                return expr;
+            },
             else => {
                 // TODO
                 unreachable;
@@ -733,20 +1058,20 @@ pub const Parser = struct {
     }
 
     fn parseRegExpExpr(p: *Parser) !Expr {
-		const start = p.cursor;
+        const start = p.cursor;
         const tok_str = p.getCurrTokStr();
 
         var flag_start = tok_str.len - 1;
         while (tok_str[flag_start] != '/') : (flag_start -= 1) {
-			std.debug.print("{c}\n", .{tok_str[flag_start]});
-		}
+            std.debug.print("{c}\n", .{tok_str[flag_start]});
+        }
 
         var flags = tok_str[flag_start + 1 ..];
         var pattern = tok_str[1..flag_start];
 
         p.advance();
 
-        var reg_exp = try p.heapInit(RegExp, RegExp{
+        var reg_exp = try p.heapInit(RegExp{
             .loc = try p.getLocation(start),
             .flags = flags,
             .pattern = pattern,
@@ -784,6 +1109,63 @@ pub const Parser = struct {
             }
         }
         return Raw{ .loc = try p.getLocation(start), .tokens = raw_arr.items };
+    }
+
+    fn parseSpreadElement(p: *Parser) !*SpreadElement {
+        const start = p.cursor;
+        _ = p.eat(TT.EllipsisToken, null);
+
+        var expr = try p.parseAssignmentExpression();
+        return try p.heapInit(SpreadElement{
+            .loc = try p.getLocation(start),
+            .arg = expr,
+        });
+    }
+
+    /// Parses `[ <expr> , <expr> ]`
+    fn parseArrayInitializer(p: *Parser) !Expr {
+        const start = p.cursor;
+        p.advance();
+        p.skipWS();
+
+        var elements = ArrayList(?ArrayExprElement).init(p._a);
+
+        var curr = p.current();
+        while (curr.tok_type != TT.CloseBracketToken) { // ']'
+            if (curr.tok_type == TT.CommaToken) {
+                p.advance();
+                try elements.append(null);
+                p.skipWS();
+                curr = p.current();
+                continue;
+            } else if (curr.tok_type == TT.EllipsisToken) { // '...'
+                const element = try p.parseSpreadElement();
+                p.skipWS();
+                curr = p.current();
+                const arr_expr_element: ?ArrayExprElement = ArrayExprElement{ .spread_element = element };
+                try elements.append(arr_expr_element);
+            } else {
+                const expr = try p.parseAssignmentExpression();
+                try elements.append(ArrayExprElement{ .expr = expr });
+            }
+            p.skipWS();
+            curr = p.current();
+            if (curr.tok_type == TT.CommaToken) p.advanceWS();
+            curr = p.current();
+        }
+
+        if (elements.items.len > 0) {
+            if (elements.items[elements.items.len - 1] == null) {
+                _ = elements.pop();
+            }
+        }
+
+        p.advance();
+
+        return Expr{ .arr_expr = try p.heapInit(ArrayExpr{
+            .loc = try p.getLocation(start),
+            .elements = elements.items,
+        }) };
     }
 
     fn matchAsyncFunction(p: *Parser) bool {
@@ -825,6 +1207,11 @@ pub const Parser = struct {
         p.scanner_instance.deinit();
     }
 
+    fn advanceWS(p: *Parser) void {
+        p.advance();
+        p.skipWS();
+    }
+
     /// Advance 1 token ahead
     inline fn advance(p: *Parser) void {
         p.cursor += 1;
@@ -849,8 +1236,8 @@ pub const Parser = struct {
                 }
             }
         } else {
-            const expected = std.fmt.allocPrint(p._a, "{s}", .{tt}) catch unreachable;
-            const found = std.fmt.allocPrint(p._a, "{s}", .{curr.tok_type}) catch unreachable;
+            const expected = std.fmt.allocPrint(p._a, "{}", .{tt}) catch unreachable;
+            const found = std.fmt.allocPrint(p._a, "{}", .{curr.tok_type}) catch unreachable;
             p.addExpectedFoundError(expected, found);
             return null;
         }
@@ -874,17 +1261,17 @@ pub const Parser = struct {
     }
 
     fn match(p: *Parser, tt: TokenType) bool {
-        return p.lookAhead().tok_type == tt;
+        return p.current().tok_type == tt;
     }
 
     /// Adds a New Error
     fn addError(p: *Parser, _type: ParserErrorType) void {
         const curr = p.current();
         p.errors.append(Error{
-            .line = curr.start_line,
-            .col = curr.start_col,
-            .start = curr.start,
-            .end = curr.end,
+            .line = curr.loc.start_line,
+            .col = curr.loc.start_col,
+            .start = curr.loc.start,
+            .end = curr.loc.end,
             .error_type = _type,
         }) catch unreachable;
     }
@@ -905,10 +1292,10 @@ pub const Parser = struct {
     fn addExpectedFoundError(p: *Parser, expected: []const u8, found: []const u8) void {
         const curr = p.current();
         p.errors.append(Error{
-            .line = curr.start_line,
-            .col = curr.start_col,
-            .start = curr.start,
-            .end = curr.end,
+            .line = curr.loc.start_line,
+            .col = curr.loc.start_col,
+            .start = curr.loc.start,
+            .end = curr.loc.end,
             .error_type = ParserErrorType{
                 .ExpectedFound = .{ .expected = expected, .found = found },
             },
@@ -942,7 +1329,7 @@ pub const Parser = struct {
 
     /// Look one step ahead and get the
     fn lookAhead(p: *Parser) Token {
-        if (p.cursor + 1 >= p.tokens.len) return p.tokens.items[p.tokens.items.len - 1];
+        if (p.cursor + 1 >= p.tokens.items.len) return p.tokens.items[p.tokens.items.len - 1];
         return p.tokens.items[p.cursor + 1];
     }
 
@@ -957,7 +1344,8 @@ pub const Parser = struct {
     }
 
     /// Allocate the variable `obj` of type `T` on the heap and return
-    pub fn heapInit(p: *Parser, comptime T: type, obj: T) !*T {
+    pub fn heapInit(p: *Parser, obj: anytype) Err!*@TypeOf(obj) {
+        const T = @TypeOf(obj);
         const o: *T = try p._a.create(T);
         o.* = obj;
         return o;
@@ -974,7 +1362,7 @@ pub const Parser = struct {
         const start_tok: Token = p.tokens.items[start];
         const end_tok: Token = p.tokens.items[p.cursor - 1];
         // std.debug.print("\n===\n{d}\n{d}\n===\n", .{start_tok.start, end_tok.end});
-        var loc = try p.heapInit(Location, Location{
+        var loc = try p.heapInit(Location{
             .start = start_tok.loc.start,
             .end = end_tok.loc.end,
             .start_line = start_tok.loc.start_line,

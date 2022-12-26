@@ -24,10 +24,18 @@ const Raw = nodes.Raw;
 const Decl = nodes.Decl;
 const LabeledStmt = nodes.LabeledStmt;
 
+const VarDecl = nodes.VarDecl;
+
 const UnaryExpr = nodes.UnaryExpr;
+const AssignmentExpr = nodes.AssignmentExpr;
+const ArrowFunc = nodes.ArrowFunc;
+const ArrowFuncBody = nodes.ArrowFuncBody;
 const NewExpr = nodes.NewExpr;
+const ArrayExpr = nodes.ArrayExpr;
 const RegExp = nodes.RegExp;
 
+const ArrayExprElement = nodes.ArrayExprElement;
+const SpreadElement = nodes.SpreadElement;
 const StmtListItem = nodes.StmtListItem;
 const CodeLocation = token.CodeLocation;
 // -----------------------------------------
@@ -103,6 +111,7 @@ pub const Renderer = struct {
             .expr_stmt => |expr_stmt| try r.concat(try r.renderExpr(expr_stmt.expr), ";"),
             .block_stmt => |block_stmt| try r.renderBlock(block_stmt),
             .labeled_stmt => |labeled_stmt| try r.renderLabeledStmt(labeled_stmt),
+            .var_stmt => |var_stmt| try r.renderVarDecl(var_stmt),
         };
     }
 
@@ -115,11 +124,57 @@ pub const Renderer = struct {
             .identifier => |identifier| r.renderToken(identifier.*),
             .literal => |literal| r.renderLiteral(literal.*),
             .reg_exp => |reg_exp| r.renderRegExp(reg_exp),
+
+            .assignment_expr => |assignment_expr| r.renderAssignmentExpr(assignment_expr),
+            .arr_expr => |arr_expr| r.renderArrExpr(arr_expr),
+            .arrow_func => |arrow_func| r.renderArrowFunc(arrow_func),
         };
     }
 
+    pub fn renderAssignmentExpr(r: *Renderer, ae: *AssignmentExpr) Err![]const u8 {
+        return try r.format("{s}={s}", .{ try r.renderExpr(ae.left_expr), try r.renderExpr(ae.right_expr) });
+    }
+
+    pub fn renderArrExpr(r: *Renderer, ae: *ArrayExpr) Err![]const u8 {
+        var res: []const u8 = "[";
+        for (ae.elements) |element, i| {
+            if (element) |e| {
+                res = try r.concat(res, try r.renderArrayExprElement(e));
+            }
+            if (i != ae.elements.len - 1) res = try r.concat(res, ",");
+        }
+        return try r.concat(res, "]");
+    }
+
+    pub fn renderVarDecl(r: *Renderer, var_decl: *VarDecl) Err![]const u8 {
+        _ = r;
+        _ = var_decl;
+        return "";
+    }
+
+    pub fn renderArrayExprElement(r: *Renderer, aee: ArrayExprElement) Err![]const u8 {
+        return switch (aee) {
+            .expr => |expr| r.renderExpr(expr),
+            .spread_element => |se| r.renderSpreadElement(se),
+        };
+    }
+
+    pub fn renderSpreadElement(r: *Renderer, se: *SpreadElement) Err![]const u8 {
+        return try r.concat("...", try r.renderExpr(se.arg));
+    }
+
+    pub fn renderArrowFunc(r: *Renderer, af: *ArrowFunc) Err![]const u8 {
+        return try r.format("{s}=>{s}", .{
+            try r.renderExpr(af.args),
+            switch (af.body.*) {
+                .block => |b| try r.renderBlock(b),
+                .expr => |e| try r.renderExpr(e),
+            },
+        });
+    }
+
     pub fn renderRegExp(r: *Renderer, reg_exp: *RegExp) Err![]const u8 {
-		return try r.format("/{s}/{s}", .{ reg_exp.pattern, reg_exp.flags });
+        return try r.format("/{s}/{s}", .{ reg_exp.pattern, reg_exp.flags });
     }
 
     pub fn renderLiteral(r: *Renderer, tok: Token) Err![]const u8 {
@@ -128,13 +183,21 @@ pub const Renderer = struct {
             TT.HexadecimalToken,
             TT.DecimalToken,
             => {},
-            TT.BinaryToken,
-            TT.OctalToken,
-            TT.BigIntToken,
-            => {},
+            TT.BinaryToken, TT.BigIntToken => {},
+            TT.OctalToken => {
+                var res: u32 = std.fmt.parseInt(u32, value, 0) catch |e| {
+                    std.debug.print("ERROR: {}\n", .{e});
+                    return "0";
+                };
+                value = try r.format("{d}", .{res});
+            },
             TT.OctalTokenWithoutO => {
-                var res: u32 = std.fmt.parseInt(u32, value, 8) catch |e| {
-                    std.debug.print("{}\n", .{e});
+                var first_index: usize = 0;
+                if (value[0] == '0') {
+                    while (value[first_index] == '0') : (first_index += 1) {}
+                }
+                var res: f64 = std.fmt.parseFloat(f64, value[first_index..value.len]) catch |e| {
+                    std.debug.print("ERROR: {}\n", .{e});
                     return "0";
                 };
                 value = try r.format("{d}", .{res});
@@ -147,8 +210,10 @@ pub const Renderer = struct {
     pub fn renderSeqExpr(r: *Renderer, seq_expr: *SeqExpr) Err![]const u8 {
         var res: []const u8 = "";
         for (seq_expr.exprs) |expr, i| {
-            res = try r.concat(res, try r.renderExpr(expr));
-            if (i != seq_expr.exprs.len - 1) res = try r.concat(res, ",");
+            if (expr) |e| {
+                res = try r.concat(res, try r.renderExpr(e));
+                if (i != seq_expr.exprs.len - 1) res = try r.concat(res, ",");
+            }
         }
         return res;
     }
@@ -162,7 +227,11 @@ pub const Renderer = struct {
     }
 
     pub fn renderToken(r: *Renderer, t: Token) []const u8 {
-        return r.code[t.loc.start..t.loc.end];
+        const s = r.code[t.loc.start..t.loc.end];
+        return switch (t.tok_type) {
+            TT.IdentifierToken => utils.renderStringDecodedUnicode(r._a, s) catch "",
+            else => s,
+        };
     }
 
     pub fn concat(r: *Renderer, a: []const u8, b: []const u8) Err![]const u8 {

@@ -88,7 +88,24 @@ test "Scanner" {
         },
         .{
             .ts = "= += -= *= **= /= %= <<=",
-            .ttypes = &[_]TT{ .EqToken, .WhitespaceToken, .AddEqToken, .WhitespaceToken, .SubEqToken, .WhitespaceToken, .MulEqToken, .WhitespaceToken, .ExpEqToken, .WhitespaceToken, .DivEqToken, .WhitespaceToken, .ModEqToken, .WhitespaceToken, .LtLtEqToken, .EOF },
+            .ttypes = &[_]TT{
+                .EqToken,
+                .WhitespaceToken,
+                .AddEqToken,
+                .WhitespaceToken,
+                .SubEqToken,
+                .WhitespaceToken,
+                .MulEqToken,
+                .WhitespaceToken,
+                .ExpEqToken,
+                .WhitespaceToken,
+                .DivEqToken,
+                .WhitespaceToken,
+                .ModEqToken,
+                .WhitespaceToken,
+                .LtLtEqToken,
+                .EOF,
+            },
             .lexemes = &.{ "=", " ", "+=", " ", "-=", " ", "*=", " ", "**=", " ", "/=", " ", "%=", " ", "<<=", "" },
         },
         .{
@@ -346,6 +363,8 @@ test "Scanner" {
         .{ .ts = "50e+-0", .ttypes = &[_]TT{ .ErrorToken, .EOF }, .lexemes = &.{ "50e+-0", "" } },
         .{ .ts = "5.a", .ttypes = &[_]TT{ .DecimalToken, .ErrorToken, .EOF }, .lexemes = &.{ "5.", "a", "" } },
         .{ .ts = "5..a", .ttypes = &[_]TT{ .DecimalToken, .DotToken, .IdentifierToken, .EOF }, .lexemes = &.{ "5.", ".", "a", "" } },
+        .{ .ts = "08", .ttypes = &[_]TT{ .OctalTokenWithoutO, .EOF }, .lexemes = &.{ "08", "" } },
+        .{ .ts = "0008", .ttypes = &[_]TT{ .OctalTokenWithoutO, .EOF }, .lexemes = &.{ "0008", "" } },
 
         // coverage
         // TODO: Check the one below
@@ -368,16 +387,21 @@ test "Scanner" {
 
         // issues
         .{ .ts = "_\u{00}bare_unicode_escape_identifier", .ttypes = &[_]TT{ .IdentifierToken, .EOF }, .lexemes = &.{ "_\u{00}bare_unicode_escape_identifier", "" } }, // tdewolff/minify#449
+        .{ .ts = "日本語", .ttypes = &[_]TT{ .IdentifierToken, .EOF }, .lexemes = &.{ "日本語", "" } },
+		.{ .ts = "\\u2163\\u2161\\u200A", .ttypes = &[_]TT{ .IdentifierToken, .EOF }, .lexemes = &.{ "ⅣⅡ\u{200A}", "" } },
     };
 
-    const a = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+	defer arena.deinit();
+	const a = arena.allocator();
     var scanner = try a.create(Scanner);
     defer a.destroy(scanner);
 
     scanner.* = Scanner.init(a, undefined, undefined, undefined);
     defer scanner.deinit();
 
-    const MAX = 85;
+	const MAX = tokenTests.len - 1;
+	// const MAX = 52;
     for (tokenTests) |tokenTest, i| {
         if (i <= MAX) {
             defer {
@@ -390,6 +414,7 @@ test "Scanner" {
                 scanner.templateLevels.deinit();
                 scanner.raw_text_offset = 0;
             }
+
             var tokens = std.ArrayList(Token).init(a);
             var errors = ArrayList(Error).init(a);
             var warnings = ArrayList(Error).init(a);
@@ -414,12 +439,18 @@ test "Scanner" {
             if (scanner.tokens.items.len == tokenTest.ttypes.len) {
                 for (scanner.tokens.items) |tok, j| {
                     if (tok.tok_type != tokenTest.ttypes[j]) {
-                        std.debug.print("NOT EQUAL TokenType: {} == {}\n", .{ tok.tok_type, tokenTest.ttypes[j] });
+                        std.debug.print(
+                            "i: {d}, NOT EQUAL TokenType: {} == {}\n",
+                            .{ i, tok.tok_type, tokenTest.ttypes[j] },
+                        );
                         flag = false;
                     }
                 }
             } else {
-                std.debug.print("\nERROR: scanner.tokens.len ({d}) != tokenTest.ttypes.len ({d})\n", .{ scanner.tokens.items.len, tokenTest.ttypes.len });
+                std.debug.print(
+                    "\nERROR: i: {d}, scanner.tokens.len ({d}) != tokenTest.ttypes.len ({d})\n",
+                    .{ i, scanner.tokens.items.len, tokenTest.ttypes.len },
+                );
                 flag = false;
             }
 
@@ -432,7 +463,10 @@ test "Scanner" {
                     }
                 }
             } else {
-                std.debug.print("\n!==> ERROR: scanner.tokens.len ({d}) != tokenTest.lexemes.len ({d}) <==!\n\n", .{ scanner.tokens.items.len, tokenTest.lexemes.len });
+                std.debug.print(
+                    "\n!==> ERROR: i: {d} scanner.tokens.len ({d}) != tokenTest.lexemes.len ({d}) <==!\n\n",
+                    .{ i, scanner.tokens.items.len, tokenTest.lexemes.len },
+                );
                 flag = false;
             }
 
