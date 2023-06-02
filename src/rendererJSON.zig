@@ -94,20 +94,27 @@ pub const RendererJSON = struct {
         const length = if (tokens[tokens.len - 1].tok_type == TokenType.EOF) tokens.len - 1 else tokens.len;
 
         for (tokens) |tok, i| {
-            if (tok.tok_type != TokenType.EOF and tok.tok_type != TokenType.WhitespaceToken and tok.tok_type != TokenType.CommentToken) {
-                res = try r.concat(
-                    res,
-                    try r.format(
-                        "{{\"type\":\"{s}\",\"value\":\"{s}\",\"range\":{s},\"loc\":{s}}}",
-                        .{
-                            tok.tok_type.toString(),
-                            try r.renderToken(&tok),
-                            try r.renderRange(tok.loc),
-                            try r.renderLoc(tok.loc),
-                        },
-                    ),
-                );
-                if (i != length - 1) res = try r.concat(res, ",");
+            switch (tok.tok_type) {
+                TT.EOF,
+                TT.WhitespaceToken,
+                TT.CommentToken,
+                TT.LineTerminatorToken,
+                => {},
+                else => {
+                    res = try r.concat(
+                        res,
+                        try r.format(
+                            "{{\"type\":\"{s}\",\"value\":\"{s}\",\"range\":{s},\"loc\":{s}}}",
+                            .{
+                                tok.tok_type.toString(),
+                                try r.renderToken(&tok),
+                                try r.renderRange(tok.loc),
+                                try r.renderLoc(tok.loc),
+                            },
+                        ),
+                    );
+                    if (i != length - 1) res = try r.concat(res, ",");
+                },
             }
         }
         res = try r.concat(res, "]");
@@ -257,10 +264,8 @@ pub const RendererJSON = struct {
         var elements_str: []const u8 = "";
         for (arr.elements) |element, i| {
             if (element) |e| {
-                std.debug.print("element:{s}\n", .{try r.renderArrayExprElement(e)});
                 elements_str = try r.concat(elements_str, try r.renderArrayExprElement(e));
             } else {
-                std.debug.print("element: {any}\n", .{element});
                 elements_str = try r.concat(elements_str, "null");
             }
             if (i != arr.elements.len - 1) elements_str = try r.concat(elements_str, ",");
@@ -329,7 +334,6 @@ pub const RendererJSON = struct {
             TT.BigIntToken,
             => {},
             TT.OctalToken => {
-                std.debug.print(">> {s}, {d}\n", .{ try r.renderToken(l), l.loc.end });
                 var res: u32 = std.fmt.parseInt(u32, value, 0) catch 0;
                 value = try r.format("{d}", .{res});
                 return try r.format(
@@ -393,6 +397,7 @@ pub const RendererJSON = struct {
         return switch (t.tok_type) {
             TT.StringToken => try r.renderRawString(s),
             TT.IdentifierToken => try utils.renderStringDecodedUnicode(r._a, s),
+            TT.LineTerminatorToken => "\\n",
             else => s,
         };
     }

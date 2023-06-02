@@ -32,7 +32,7 @@ pub fn renderStringDecodedUnicode(allocator: std.mem.Allocator, string: []const 
         if (c == '\\') {
             i += 1;
             c = string[i];
-            if (c == 'u') {
+            if (c == 'u' and string[i + 1] != '{') {
                 i += 1;
                 const unicode_based_string = try encodeUnicodeToStr(allocator, string[i .. i + 4]);
                 std.mem.copy(u8, new_tok_str[len .. len + unicode_based_string.len], unicode_based_string);

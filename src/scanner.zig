@@ -34,18 +34,39 @@ const RuneStruct = struct { r: u21, n: u8 };
 
 const Err = std.mem.Allocator.Error;
 
-fn isIdentifierStart(byte: u21) bool {
-    for (unicodeESNextIdentifierStart) |uni| {
-        if (uni == byte) return true;
+fn lookupInUnicodeMap(code: u21, map: []const u21) bool {
+    // Bail out quickly if it couldn't possibly be in the map.
+    if (code < map[0]) return false;
+
+    // Perform binary search in one of the Unicode range maps
+    var lo: usize = 0;
+    var hi: usize = unicodeESNextIdentifierStart.len;
+    var mid: usize = undefined;
+
+    while (lo + 1 < hi) {
+        mid = lo + (hi - lo) / 2;
+        // mid has to be even to catch a range's beginning
+        mid -= mid % 2;
+        if (map[mid] <= code and code <= map[mid + 1]) {
+            return true;
+        }
+
+        if (code < map[mid]) {
+            hi = mid;
+        } else {
+            lo = mid + 2;
+        }
     }
+
     return false;
 }
 
+fn isIdentifierStart(byte: u21) bool {
+    return lookupInUnicodeMap(byte, &unicodeESNextIdentifierStart);
+}
+
 fn isIdentifierContinue(byte: u21) bool {
-    for (unicodeESNextIdentifierPart) |uni| {
-        if (uni == byte) return true;
-    }
-    return false;
+    return lookupInUnicodeMap(byte, &unicodeESNextIdentifierPart);
 }
 
 // IsIdentifierStart returns true if the byte-slice start is the start of an identifier
@@ -56,9 +77,7 @@ fn isIdentifierStartBytes(bytes: []const u8) bool {
     if (code_point) |b| {
         const _first = b == '$' or b == '\\' or b == '_';
         if (_first) return true;
-        for (unicodeESNextIdentifierStart) |uni| {
-            if (uni == b) return true;
-        }
+        return lookupInUnicodeMap(b, unicodeESNextIdentifierStart);
     }
     return false;
 }
@@ -96,12 +115,7 @@ fn runeIsLineTerminator(byte: u21) bool {
 }
 
 fn isWhiteSpaceBytes(bytes: []const u8) bool {
-    var r = std.unicode.Utf8View.init(bytes) catch return false;
-    const b = r.iterator(r).nextCodepoint();
-    for (WhiteSpaceUnicode) |wsu| {
-        if (wsu == b) return true;
-    }
-    return false;
+    return isWhiteSpace(utils.convertHexTou21(bytes));
 }
 
 inline fn rune(c: u8) u21 {
@@ -322,6 +336,12 @@ pub const Scanner = struct {
                     }
                     return .IdentifierToken;
                 }
+                if (c == '\\') {
+                    if (s.consumeWhitespace()) {
+                        s.prevLineTerminator = prevLineTerminator;
+                        return .WhitespaceToken;
+                    }
+                }
                 if (0xC0 <= c) {
                     if (s.consumeWhitespace()) {
                         while (s.consumeWhitespace()) {}
@@ -357,6 +377,14 @@ pub const Scanner = struct {
             if (isWhiteSpace(st.r) and !s.end()) {
                 s.move(st.n);
                 return true;
+            }
+        } else if (c == '\\' and s.lookAhead() == 'u') {
+            if (s.cursor + 6 <= s.code.len) {
+                const hex_bytes = s.code[s.cursor + 2 .. s.cursor + 6];
+                if (isWhiteSpaceBytes(hex_bytes)) {
+                    s.move(6);
+                    return true;
+                }
             }
         }
         return false;
@@ -397,16 +425,13 @@ pub const Scanner = struct {
     }
 
     fn isHextDigit(c: u8) bool {
-        return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
+        return ('0' <= c and c <= '9') or ('a' <= c and c <= 'f') or ('A' <= c and c <= 'F');
     }
 
     fn consumeHexDigit(s: *Scanner) bool {
-        const c = s.current();
-        if (Scanner.isHextDigit(c)) {
-            s.advance();
-            return true;
-        }
-        return false;
+        if (!isHextDigit(s.current())) return false;
+        s.advance();
+        return true;
     }
 
     fn consumeBinaryDigit(s: *Scanner) bool {
@@ -563,16 +588,19 @@ pub const Scanner = struct {
 
     fn consumeUnicodeEscape(s: *Scanner) bool {
         var c = s.current();
-        if (c != '\\' or s.lookAhead() != 'u') {
-            if (c == '\\') {
-                if (s.cursor != s.code.len - 1) {
-                    s.move(2);
-                }
+
+        if (c == '\\') {
+            if (s.lookAhead() != 'u') {
+                s.move(2);
+                return false;
             }
+
+            if (s.lookAhead() == 'u') {
+                s.move(2);
+            }
+        } else {
             return false;
         }
-        // const mark = s.getMark();
-        s.move(2);
         c = s.current();
         if (c == '{') {
             s.advance();
@@ -590,18 +618,35 @@ pub const Scanner = struct {
             // s.rewind(mark);
             return false;
         } else {
-			if (s.cursor + 3 >= s.code.len - 1) {
-				while (s.cursor <= s.code.len - 1) {
-					s.advance();
-				}
-				return false;
-			}
-
-            if (!(s.consumeHexDigit() and s.consumeHexDigit() and s.consumeHexDigit() and s.consumeHexDigit())) {
-                if (s.consumeIdentifierToken()) {}
-                // s.rewind(mark);
+            if (s.cursor + 3 >= s.code.len) {
+                while (s.cursor <= s.code.len - 1) {
+                    s.advance();
+                }
                 return false;
             }
+            const next4Slice = s.code[s.cursor .. s.cursor + 4];
+
+            var flag: bool = true;
+            var i: u8 = 0;
+
+            if (isWhiteSpaceBytes(next4Slice)) {
+                flag = false;
+                s.move(4);
+                return false;
+            } else {
+                while (i < 4) : (i += 1) {
+                    if (!Scanner.isHextDigit(next4Slice[i])) {
+                        flag = false;
+                    }
+                }
+            }
+
+            if (!flag) {
+                while (!s.end() and !isWhiteSpace(s.current())) : (s.advance()) {}
+                c = s.current();
+                return false;
+            }
+            if (flag) s.move(4);
         }
         return true;
     }
@@ -613,34 +658,49 @@ pub const Scanner = struct {
         if (identifierStartTable[c]) {
             s.advance();
         } else if (0xC0 <= c) {
-            const rr = s.peekRune();
+            const rr: RuneStruct = s.peekRune();
             if (isIdentifierStart(rr.r)) {
                 s.move(rr.n);
             } else {
                 return false;
             }
-        } else if (!(s.consumeUnicodeEscape())) {
+        }
+
+        var mark = s.cursor;
+        if (c == '\\' and !s.consumeUnicodeEscape()) {
+            if (isWhiteSpaceBytes(s.code[mark + 2 .. s.cursor])) {
+                s.cursor = mark;
+            }
             return false;
         }
 
         c = s.current();
+        if (s.end()) return true;
+
         while (true) {
             c = s.current();
-            if (identifierTable[c]) {
+            mark = s.cursor;
+            if (identifierTable[c] or (c == 0 and !s.end())) {
                 s.advance();
+                continue;
             } else if (0xC0 <= c) {
                 const rr = s.peekRune();
                 if (rr.r == '\u{200C}' or rr.r == '\u{200D}' or (rr.r == '\u{00}' and !s.end()) or isIdentifierContinue(rr.r)) {
                     s.move(rr.n);
+                    continue;
                 } else {
                     break;
                 }
-            } else if (!(s.consumeUnicodeEscape())) {
-                c = s.current();
-                if (c == 0 and !s.end()) {
-                    s.advance();
-                    continue;
+            } else if (isWhiteSpace(c)) {
+                break;
+            } else if (s.end()) {
+                break;
+            } else if (c == '\\' and !s.consumeUnicodeEscape()) {
+                if (isWhiteSpaceBytes(s.code[mark..s.cursor])) {
+                    s.cursor = mark;
                 }
+                return false;
+            } else {
                 break;
             }
         }
@@ -839,7 +899,6 @@ pub const Scanner = struct {
     }
 
     fn consumeTemplateToken(s: *Scanner) TokenType {
-        // assume to be on ` or } when already within template
         var continuation = s.current() == '}';
         s.advance();
         while (true) {

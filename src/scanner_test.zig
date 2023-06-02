@@ -388,22 +388,31 @@ test "Scanner" {
         // issues
         .{ .ts = "_\u{00}bare_unicode_escape_identifier", .ttypes = &[_]TT{ .IdentifierToken, .EOF }, .lexemes = &.{ "_\u{00}bare_unicode_escape_identifier", "" } }, // tdewolff/minify#449
         .{ .ts = "日本語", .ttypes = &[_]TT{ .IdentifierToken, .EOF }, .lexemes = &.{ "日本語", "" } },
-		.{ .ts = "\\u2163\\u2161\\u200A", .ttypes = &[_]TT{ .IdentifierToken, .EOF }, .lexemes = &.{ "ⅣⅡ\u{200A}", "" } },
+        .{ .ts = "\\u2163\\u2161\\u200A", .ttypes = &[_]TT{ .IdentifierToken, WT, .EOF }, .lexemes = &.{ "ⅣⅡ", "\u{200A}", "" } },
+        .{
+            .ts = "\\u2163\\u2161\\u200A=\\u2009[]",
+            .ttypes = &[_]TT{ .IdentifierToken, WT, .EqToken, WT, .OpenBracketToken, .CloseBracketToken, .EOF },
+            .lexemes = &.{ "ⅣⅡ", "\u{200A}", "=", "\u{2009}", "[", "]", "" },
+        },
+        .{
+            .ts = "ⅣⅡ = []",
+            .ttypes = &[_]TT{ .IdentifierToken, WT, .EqToken, WT, .OpenBracketToken, .CloseBracketToken, .EOF },
+            .lexemes = &.{ "ⅣⅡ", "\u{200A}", "=", "\u{2009}", "[", "]", "" },
+        }
     };
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-	defer arena.deinit();
-	const a = arena.allocator();
+    defer arena.deinit();
+    const a = arena.allocator();
     var scanner = try a.create(Scanner);
     defer a.destroy(scanner);
 
     scanner.* = Scanner.init(a, undefined, undefined, undefined);
     defer scanner.deinit();
 
-	const MAX = tokenTests.len - 1;
-	// const MAX = 52;
+    const MAX = tokenTests.len - 1;
     for (tokenTests) |tokenTest, i| {
-        if (i <= MAX) {
+        if (i == MAX) {
             defer {
                 scanner.cursor = 0;
                 scanner.start = 0;
@@ -427,13 +436,12 @@ test "Scanner" {
 
             const code: []const u8 = tokenTest.ts;
 
-            if (i == MAX)
-                std.debug.print("========= CODE: `{s}` ==============\n", .{code});
-
             scanner = Scanner.scan(scanner, code);
 
-            if (i == MAX)
-                scanner.printTokens();
+            if (i == MAX) {
+                // std.debug.print("========= CODE: `{s}` ==============\n", .{code});
+                // scanner.printTokens();
+            }
 
             var flag = true;
             if (scanner.tokens.items.len == tokenTest.ttypes.len) {
@@ -456,7 +464,7 @@ test "Scanner" {
 
             if (scanner.tokens.items.len == tokenTest.lexemes.len) {
                 for (tokenTest.lexemes) |lexeme, j| {
-                    const _code = scanner.tokens.items[j].toString(code);
+                    const _code = scanner.tokens.items[j].toString(a, code);
                     if (!std.mem.eql(u8, lexeme, _code)) {
                         std.debug.print("NOT EQUAL for {d}, {d}: {s} == {s}\n", .{ i, j, lexeme, _code });
                         flag = false;

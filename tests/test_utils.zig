@@ -17,6 +17,13 @@ const JSONValue = json5.Value;
 const print = std.debug.print;
 const expect = std.testing.expect;
 
+/// The following steps take place:
+/// 1. Parse
+/// 2. Render
+/// 3. Parse rendered JSON
+/// 4. Compare parsed JSON with expected JSON
+/// 5. Render to JS
+/// 6. Compare rendered JS with expected JS
 pub fn testFile(comptime folder: []const u8, comptime file_without_ext: []const u8) !void {
     const test_name = folder ++ "/" ++ file_without_ext;
 

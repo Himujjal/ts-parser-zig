@@ -164,9 +164,6 @@ pub const Parser = struct {
             warnings,
         );
 
-        _ = scanner_instance.scan(code);
-        scanner_instance.printTokens();
-
         const _a = parser_arena.allocator();
 
         return Self{
@@ -183,6 +180,9 @@ pub const Parser = struct {
     }
 
     pub fn parse(p: *Self) !Program {
+        _ = p.scanner_instance.scan(p.code);
+        // p.scanner_instance.printTokens();
+
         p.skipWS();
         const start = p.start;
         const stmt_list_items = try p.parseStmtListItemUpto(&[_]TT{TT.EOF});
@@ -237,6 +237,10 @@ pub const Parser = struct {
             TT.ClassToken => {
                 // TODO: Handle Class
                 unreachable;
+            },
+            TT.LineTerminatorToken => {
+                // TODO: Handle Line
+                p.advance();
             },
             else => {
                 const stmt = try p.parseStmt();
@@ -611,7 +615,7 @@ pub const Parser = struct {
                 }
             },
             else => {
-                p.consumeSemicolon();
+                p.consumeLineEndOrSemicolon();
                 var expr_stmt = try p.heapInit(ExprStmt{});
                 expr_stmt.loc = try p.getLocation(start);
                 expr_stmt.expr = expr;
@@ -624,7 +628,7 @@ pub const Parser = struct {
         const start = p.cursor;
         var curr = p.current();
 
-        var expr = try p.parseAssignmentExpression();
+        var expr: Expr = try p.parseAssignmentExpression();
         curr = p.current();
         p.skipWS();
 
@@ -910,6 +914,7 @@ pub const Parser = struct {
         p.skipWS();
         const tt = p.current().tok_type;
         if (tt == TT.IncrToken or tt == TT.DecrToken) {
+            // TODO:
             // expr = PostFix
         }
         return expr;
@@ -1063,7 +1068,8 @@ pub const Parser = struct {
 
         var flag_start = tok_str.len - 1;
         while (tok_str[flag_start] != '/') : (flag_start -= 1) {
-            std.debug.print("{c}\n", .{tok_str[flag_start]});
+            // std.debug.print("{c}\n", .{tok_str[flag_start]});
+            // RegExp
         }
 
         var flags = tok_str[flag_start + 1 ..];
@@ -1181,13 +1187,23 @@ pub const Parser = struct {
         }
     }
 
+    fn consumeLineEndOrSemicolon(p: *Parser) void {
+        p.skipWS();
+        var tt = p.current().tok_type;
+        if (tt == TT.SemicolonToken or tt == TT.LineTerminatorToken) {
+            p.advance();
+        } else {
+            // TODO: Error
+        }
+    }
+
     fn consumeSemicolon(p: *Parser) void {
         p.skipWS();
         var tt = p.current().tok_type;
-        if (tt == TT.SemicolonToken) p.advance();
-        tt = p.current().tok_type;
-        if (tt != TT.EOF or tt != TT.CloseBraceToken) {
-            // TODO: Add Error
+        if (tt == TT.SemicolonToken) {
+            p.advance();
+        } else {
+            // TODO: Error
         }
     }
 
@@ -1308,8 +1324,9 @@ pub const Parser = struct {
         return p.current();
     }
 
-    fn printCurrentTok(p: *Parser, num: []const u8) void {
-        std.debug.print("{s}\t==> TOKEN_TYPE: {}, string: {s}\n", .{ num, p.current().tok_type, p.getCurrTokStr() });
+    /// Print Current Token with
+    fn printCurrentTok(p: *Parser, extra_info: ?[]const u8) void {
+        std.debug.print("{s}\t==> TOKEN_TYPE: {}, string: {s}\n", .{ if (extra_info) |n| n else "", p.current().tok_type, p.getCurrTokStr() });
     }
 
     /// Get the string value of the token under the cursor
