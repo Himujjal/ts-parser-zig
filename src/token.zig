@@ -407,7 +407,7 @@ pub const Token = struct {
             else => utils.renderStringDecodedUnicode(allocator, tok_str) catch "",
         };
 
-        var res: []const u8 = std.fmt.allocPrint(
+        const res: []const u8 = std.fmt.allocPrint(
             allocator,
             "[\"{s}\", {}, {d}, {d}, {{line.start={d},col.start={d},line.end={d},col.end={d}}}]",
             .{
@@ -425,7 +425,7 @@ pub const Token = struct {
     }
 
     pub fn toString(t: *Token, allocator: Allocator, code: []const u8) []const u8 {
-        var tok_str = code[t.loc.start..t.loc.end];
+        const tok_str = code[t.loc.start..t.loc.end];
         return switch (t.tok_type) {
             TokenType.ErrorToken => tok_str,
             else => utils.renderStringDecodedUnicode(allocator, tok_str) catch "",
@@ -433,7 +433,7 @@ pub const Token = struct {
     }
 
     pub fn testing(self: *Token, allocator: Allocator) void {
-        var res: []const u8 = std.fmt.allocPrint(
+        const res: []const u8 = std.fmt.allocPrint(
             allocator,
             "({d},{d})",
             .{ self.start, self.end },

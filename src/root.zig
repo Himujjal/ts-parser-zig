@@ -1,6 +1,8 @@
 const std = @import("std");
 const expect = std.testing.expect;
-const parser = @import("parser.zig");
+pub const parser = @import("parser.zig");
+pub const renderer_json = @import("rendererJSON.zig");
+pub const renderer = @import("renderer.zig");
 
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;

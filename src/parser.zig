@@ -150,14 +150,14 @@ pub const Parser = struct {
         var parser_arena = allocator.create(ArenaAllocator) catch unreachable;
         parser_arena.* = ArenaAllocator.init(allocator);
 
-        var tokens = allocator.create(ArrayList(Token)) catch unreachable;
+        const tokens = allocator.create(ArrayList(Token)) catch unreachable;
         tokens.* = ArrayList(Token).init(allocator);
-        var errors = allocator.create(ArrayList(Error)) catch unreachable;
+        const errors = allocator.create(ArrayList(Error)) catch unreachable;
         errors.* = ArrayList(Error).init(allocator);
-        var warnings = allocator.create(ArrayList(Error)) catch unreachable;
+        const warnings = allocator.create(ArrayList(Error)) catch unreachable;
         warnings.* = ArrayList(Error).init(allocator);
 
-        var scanner_instance = Scanner.init(
+        const scanner_instance = Scanner.init(
             allocator,
             tokens,
             errors,
@@ -212,7 +212,7 @@ pub const Parser = struct {
     }
 
     fn parseStmtListItem(p: *Parser) !?StmtListItem {
-        var tok: Token = p.current();
+        const tok: Token = p.current();
         switch (tok.tok_type) {
             TT.ExportToken => {
                 // TODO: handle export
@@ -358,7 +358,7 @@ pub const Parser = struct {
         const start = p.cursor;
         _ = p.eat(TT.VarToken, null);
         p.advanceWS();
-        var var_decls = try p.parseVarDeclList(false);
+        const var_decls = try p.parseVarDeclList(false);
         return try p.heapInit(VarDecl{ .loc = try p.getLocation(start), .decls = var_decls, .kind = .Var });
     }
 
@@ -415,7 +415,7 @@ pub const Parser = struct {
     }
 
     fn parsePattern(p: *Parser, kind: VarDeclKind, params: *ArrayList(Token)) Err!BindingPatternIdentifier {
-        var curr = p.current();
+        const curr = p.current();
         if (curr.tok_type == TT.OpenBracketToken) { // '['
             const array_pattern = try p.parseArrayPattern(params, kind);
             return BindingPatternIdentifier{
@@ -579,7 +579,7 @@ pub const Parser = struct {
     fn parseBlock(p: *Parser) !*Block {
         const start = p.start;
         p.advance();
-        var stmts: ArrayList(Stmt) = ArrayList(Stmt).init(p._a);
+        const stmts: ArrayList(Stmt) = ArrayList(Stmt).init(p._a);
 
         var curr_tt = p.current().tok_type;
         while (curr_tt != TT.CloseBraceToken and curr_tt != TT.EOF) {
@@ -597,7 +597,7 @@ pub const Parser = struct {
         const start = p.cursor;
         var curr = p.current();
 
-        var expr = try p.parseExpr();
+        const expr = try p.parseExpr();
 
         p.skipWS();
         curr = p.current();
@@ -628,7 +628,7 @@ pub const Parser = struct {
         const start = p.cursor;
         var curr = p.current();
 
-        var expr: Expr = try p.parseAssignmentExpression();
+        const expr: Expr = try p.parseAssignmentExpression();
         curr = p.current();
         p.skipWS();
 
@@ -660,7 +660,7 @@ pub const Parser = struct {
         const start = p.cursor;
 
         // TODO: Lots of stuffs to do
-        var left_expr = try p.parseConditionalExpr();
+        const left_expr = try p.parseConditionalExpr();
         p.skipWS();
 
         var curr = p.current();
@@ -673,7 +673,7 @@ pub const Parser = struct {
             switch (left_expr) {
                 .identifier => {
                     // TODO: If variable name is not a keyword or restricted word in strict mode
-                    var right_expr = try p.parseConditionalExpr();
+                    const right_expr = try p.parseConditionalExpr();
                     return Expr{
                         .assignment_expr = try p.heapInit(AssignmentExpr{
                             .loc = try p.getLocation(start),
@@ -702,7 +702,7 @@ pub const Parser = struct {
         const start = p.cursor;
         _ = start;
 
-        var expr = try p.parseLogicalOrNullish();
+        const expr = try p.parseLogicalOrNullish();
         if (p.current().tok_type == TT.QuestionToken) {
             // TODO: Handle this part
         }
@@ -714,13 +714,13 @@ pub const Parser = struct {
 
         _ = start;
 
-        var expr = try p.parseLogicalAnd();
+        const expr = try p.parseLogicalAnd();
         p.skipWS();
 
-        var curr = p.current();
+        const curr = p.current();
         if (curr.tok_type == TT.OrToken or curr.tok_type == TT.NullishToken) {
             p.advance();
-            var another_expr = try p.parseLogicalOrNullish();
+            const another_expr = try p.parseLogicalOrNullish();
             // TODO: handle another_expr
             _ = another_expr;
         }
@@ -732,13 +732,13 @@ pub const Parser = struct {
         const start = p.start;
         _ = start;
 
-        var expr = try p.parseBitwiseOr();
+        const expr = try p.parseBitwiseOr();
         p.skipWS();
 
-        var curr = p.current();
+        const curr = p.current();
         if (curr.tok_type == TT.AndToken) {
             p.advance();
-            var another_expr = try p.parseLogicalAnd();
+            const another_expr = try p.parseLogicalAnd();
             // TODO
             _ = another_expr;
         }
@@ -748,12 +748,12 @@ pub const Parser = struct {
     fn parseBitwiseOr(p: *Parser) !Expr {
         const start = p.start;
         _ = start;
-        var expr = try p.parseBitwiseXor();
+        const expr = try p.parseBitwiseXor();
         p.skipWS();
-        var curr = p.current();
+        const curr = p.current();
         if (curr.tok_type == TT.BitOrToken) {
             p.advance();
-            var another_expr = try p.parseBitwiseOr();
+            const another_expr = try p.parseBitwiseOr();
             // TODO
             _ = another_expr;
         }
@@ -764,12 +764,12 @@ pub const Parser = struct {
         const start = p.start;
         _ = start;
 
-        var expr = try p.parseBitwiseAnd();
+        const expr = try p.parseBitwiseAnd();
         p.skipWS();
-        var curr = p.current();
+        const curr = p.current();
         if (curr.tok_type == TT.BitXorToken) {
             p.advance();
-            var another_expr = try p.parseBitwiseXor();
+            const another_expr = try p.parseBitwiseXor();
             // TODO
             _ = another_expr;
         }
@@ -780,12 +780,12 @@ pub const Parser = struct {
         const start = p.start;
         _ = start;
 
-        var expr = try p.parseEqualityExpr();
+        const expr = try p.parseEqualityExpr();
         p.skipWS();
-        var curr = p.current();
+        const curr = p.current();
         if (curr.tok_type == TT.BitAndToken) {
             p.advance();
-            var another_expr = try p.parseBitwiseAnd();
+            const another_expr = try p.parseBitwiseAnd();
             // TODO
             _ = another_expr;
         }
@@ -796,15 +796,15 @@ pub const Parser = struct {
         const start = p.start;
         _ = start;
 
-        var expr = try p.parseComparisonExpr();
+        const expr = try p.parseComparisonExpr();
         p.skipWS();
-        var tt = p.current().tok_type;
+        const tt = p.current().tok_type;
         switch (tt) {
             TT.EqEqToken, TT.EqEqEqToken, TT.NotEqToken, TT.NotEqEqToken => {
                 p.advance();
-                var another_expr = try p.parseEqualityExpr();
+                const another_expr = try p.parseEqualityExpr();
                 _ = another_expr;
-                // TODO
+                unreachable;
             },
             else => {},
         }
@@ -814,12 +814,12 @@ pub const Parser = struct {
     fn parseComparisonExpr(p: *Parser) !Expr {
         const start = p.cursor;
         _ = start;
-        var expr = try p.parseAddSubExpr();
+        const expr = try p.parseAddSubExpr();
         p.skipWS();
         const tt = p.current().tok_type;
         if (tt == TT.LtLtToken or tt == TT.GtGtToken or tt == TT.GtGtGtToken) {
             p.advance();
-            var another_expr = try p.parseComparisonExpr();
+            const another_expr = try p.parseComparisonExpr();
             _ = another_expr;
             // TODO
         }
@@ -829,12 +829,12 @@ pub const Parser = struct {
     fn parseAddSubExpr(p: *Parser) !Expr {
         const start = p.cursor;
         _ = start;
-        var expr = try p.parseMulDiv();
+        const expr = try p.parseMulDiv();
         p.skipWS();
         const tt = p.current().tok_type;
         if (tt == TT.MulToken or tt == TT.DivToken or tt == TT.ModToken) {
             p.advance();
-            var another_expr = try p.parseAddSubExpr();
+            const another_expr = try p.parseAddSubExpr();
             _ = another_expr;
             // TODO
         }
@@ -844,12 +844,12 @@ pub const Parser = struct {
     fn parseMulDiv(p: *Parser) !Expr {
         const start = p.cursor;
         _ = start;
-        var expr = try p.parseExponentiationExpr();
+        const expr = try p.parseExponentiationExpr();
         p.skipWS();
         const tt = p.current().tok_type;
         if (tt == TT.MulToken or tt == TT.DivToken or tt == TT.ModToken) {
             p.advance();
-            var another_expr = try p.parseMulDiv();
+            const another_expr = try p.parseMulDiv();
             _ = another_expr;
             // TODO
         }
@@ -859,12 +859,12 @@ pub const Parser = struct {
     fn parseExponentiationExpr(p: *Parser) !Expr {
         const start = p.cursor;
         _ = start;
-        var expr = try p.parsePrefixExpr();
+        const expr = try p.parsePrefixExpr();
         p.skipWS();
         const tt = p.current().tok_type;
         if (tt == TT.ExpToken) {
             p.advance();
-            var another_expr = try p.parseExponentiationExpr();
+            const another_expr = try p.parseExponentiationExpr();
             _ = another_expr;
             // TODO
         }
@@ -910,7 +910,7 @@ pub const Parser = struct {
         const start = p.cursor;
         _ = start;
 
-        var expr = try p.parseNewExpr();
+        const expr = try p.parseNewExpr();
         p.skipWS();
         const tt = p.current().tok_type;
         if (tt == TT.IncrToken or tt == TT.DecrToken) {
@@ -923,7 +923,7 @@ pub const Parser = struct {
     fn parseNewExpr(p: *Parser) !Expr {
         const start = p.cursor;
 
-        var tt = p.current().tok_type;
+        const tt = p.current().tok_type;
         if (tt == TT.NewToken) {
             p.advance();
             p.skipWS();
@@ -940,10 +940,10 @@ pub const Parser = struct {
         const start = p.cursor;
         _ = start;
 
-        var expr = p.parseGroupingExpr();
+        const expr = p.parseGroupingExpr();
         p.skipWS();
 
-        var curr = p.current();
+        const curr = p.current();
 
         switch (curr.tok_type) {
             TT.DotToken => {
@@ -998,7 +998,7 @@ pub const Parser = struct {
                 }
             },
             TT.OpenParenToken => {
-                var exprs = try p.parseExpr();
+                const exprs = try p.parseExpr();
                 curr = p.current();
 
                 if (curr.tok_type == TT.CloseParenToken) {
@@ -1039,19 +1039,19 @@ pub const Parser = struct {
             TT.HexadecimalToken,
             TT.BigIntToken,
             => {
-                var expr = Expr{ .literal = p.currentHeap() };
+                const expr = Expr{ .literal = p.currentHeap() };
                 p.advance();
                 return expr;
             },
 
             TT.OpenBracketToken => { // '['
-                var expr = try p.parseArrayInitializer();
+                const expr = try p.parseArrayInitializer();
                 return expr;
             },
 
             TT.RegExpToken => try p.parseRegExpExpr(),
             TT.StringToken => {
-                var expr = Expr{ .literal = p.currentHeap() };
+                const expr = Expr{ .literal = p.currentHeap() };
                 p.advance();
                 return expr;
             },
@@ -1072,12 +1072,12 @@ pub const Parser = struct {
             // RegExp
         }
 
-        var flags = tok_str[flag_start + 1 ..];
-        var pattern = tok_str[1..flag_start];
+        const flags = tok_str[flag_start + 1 ..];
+        const pattern = tok_str[1..flag_start];
 
         p.advance();
 
-        var reg_exp = try p.heapInit(RegExp{
+        const reg_exp = try p.heapInit(RegExp{
             .loc = try p.getLocation(start),
             .flags = flags,
             .pattern = pattern,
@@ -1121,7 +1121,7 @@ pub const Parser = struct {
         const start = p.cursor;
         _ = p.eat(TT.EllipsisToken, null);
 
-        var expr = try p.parseAssignmentExpression();
+        const expr = try p.parseAssignmentExpression();
         return try p.heapInit(SpreadElement{
             .loc = try p.getLocation(start),
             .arg = expr,
@@ -1189,7 +1189,7 @@ pub const Parser = struct {
 
     fn consumeLineEndOrSemicolon(p: *Parser) void {
         p.skipWS();
-        var tt = p.current().tok_type;
+        const tt = p.current().tok_type;
         if (tt == TT.SemicolonToken or tt == TT.LineTerminatorToken) {
             p.advance();
         } else {
@@ -1199,7 +1199,7 @@ pub const Parser = struct {
 
     fn consumeSemicolon(p: *Parser) void {
         p.skipWS();
-        var tt = p.current().tok_type;
+        const tt = p.current().tok_type;
         if (tt == TT.SemicolonToken) {
             p.advance();
         } else {
@@ -1379,7 +1379,7 @@ pub const Parser = struct {
         const start_tok: Token = p.tokens.items[start];
         const end_tok: Token = p.tokens.items[p.cursor - 1];
         // std.debug.print("\n===\n{d}\n{d}\n===\n", .{start_tok.start, end_tok.end});
-        var loc = try p.heapInit(Location{
+        const loc = try p.heapInit(Location{
             .start = start_tok.loc.start,
             .end = end_tok.loc.end,
             .start_line = start_tok.loc.start_line,

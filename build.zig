@@ -1,28 +1,51 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+// Although this function looks imperative, note that its job is to
+// declaratively construct a build graph that will be executed by an external
+// runner.
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
 
-    const lib = b.addStaticLibrary("ts-parser-zig", "src/lib.zig");
-    lib.setBuildMode(mode);
-    lib.install();
+    const optimize = b.standardOptimizeOption(.{});
 
-    const lib2 = b.addSharedLibrary("ts-parser-zig", "src/lib.zig", .unversioned);
-    lib2.setBuildMode(mode);
-    lib2.setTarget(.{ .cpu_arch = .wasm32, .os_tag = .wasi });
-    lib2.install();
+    const lib = b.addStaticLibrary(.{
+        .name = "ts-parser-zig",
+        .root_source_file = .{ .path = b.pathFromRoot("src/root.zig") },
+        .target = target,
+        .optimize = optimize,
+    });
 
-    const test_step = b.step("test", "Run library tests");
+    const lib_wasm = b.addSharedLibrary(.{
+        .name = "ts-parser-zig",
+        .root_source_file = .{ .path = b.pathFromRoot("src/root.zig") },
+        .target = target,
+        .optimize = optimize,
+    });
 
-    const main_tests = b.addTest("src/lib.zig");
-    main_tests.setBuildMode(mode);
-    test_step.dependOn(&main_tests.step);
+    b.installArtifact(lib);
+    b.installArtifact(lib_wasm);
 
-    const json_tests = b.addTest("tests/test_main.zig");
-    json_tests.main_pkg_path = ".";
-    json_tests.addIncludePath("src");
-    json_tests.setBuildMode(mode);
-    test_step.dependOn(&json_tests.step);
+    const fixtures_unit_test = b.addTest(.{
+        .root_source_file = .{ .path = b.pathFromRoot("tests/test_main.zig") },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const fixture_test_run = b.addRunArtifact(fixtures_unit_test);
+
+    const lib_unit_test = b.addTest(.{
+        .name = "ts-parser-zig",
+        .root_source_file = .{ .path = b.pathFromRoot("src/root.zig") },
+        .target = target,
+        .optimize = optimize,
+    });
+    const lib_unit_test_run = b.addRunArtifact(lib_unit_test);
+
+    const tsParserModule = b.createModule(.{ .root_source_file = .{ .path = b.pathFromRoot("src/root.zig") } });
+    fixtures_unit_test.root_module.addImport("ts-parser-zig", tsParserModule);
+    lib_unit_test.root_module.addImport("ts-parser-zig", tsParserModule);
+
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&fixture_test_run.step);
+    test_step.dependOn(&lib_unit_test_run.step);
 }

@@ -1,8 +1,13 @@
 const std = @import("std");
 const json5 = @import("json5.zig");
-const parser = @import("../src/parser.zig");
-const renderer_json = @import("../src/rendererJSON.zig");
-const renderer = @import("../src/renderer.zig");
+const tsParserZig = @import("ts-parser-zig");
+const parser = tsParserZig.parser;
+const renderer_json = tsParserZig.renderer_json;
+const renderer = tsParserZig.renderer;
+
+// const parser = @import("src/parser.zig");
+// const renderer_json = @import("src/rendererJSON.zig");
+// const renderer = @import("src/renderer.zig");
 const Allocator = std.Allocator;
 const allocator = std.testing.allocator;
 
@@ -83,7 +88,7 @@ pub fn testFile(comptime folder: []const u8, comptime file_without_ext: []const 
 
 fn getOptions(sub_test: json5.ObjectMap) TSParserOptions {
     const options_key: ?JSONValue = sub_test.get("options");
-    var options = TSParserOptions{};
+    const options = TSParserOptions{};
     if (options_key) |ok| {
         _ = ok;
         // const options_json = ok.Object;
@@ -100,7 +105,7 @@ fn getJSONFromJSON5(json5_str: []const u8) []const u8 {
     var expected_tree_json5_string = try getStringifiedJSON(tree.root);
     defer expected_tree_json5_string.deinit();
 
-    var res: []const u8 = allocator.alloc(u8, expected_tree_json5_string.items.len);
+    const res: []const u8 = allocator.alloc(u8, expected_tree_json5_string.items.len);
     std.mem.copy(u8, res, expected_tree_json5_string.items);
     return res;
 }

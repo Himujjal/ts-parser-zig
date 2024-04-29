@@ -23,7 +23,7 @@ test "Scanner" {
 
     const WT = TT.WhitespaceToken;
 
-    var tokenTests = [_]TokenTest{
+    const tokenTests = [_]TokenTest{
         .{
             // 9 11135 12 160 65279 8192
             .ts = "\t\u{2b7f}\u{000C}\u{00A0}\u{FEFF}\u{2000}",
@@ -398,7 +398,7 @@ test "Scanner" {
             .ts = "ⅣⅡ = []",
             .ttypes = &[_]TT{ .IdentifierToken, WT, .EqToken, WT, .OpenBracketToken, .CloseBracketToken, .EOF },
             .lexemes = &.{ "ⅣⅡ", "\u{200A}", "=", "\u{2009}", "[", "]", "" },
-        }
+        },
     };
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -411,7 +411,7 @@ test "Scanner" {
     defer scanner.deinit();
 
     const MAX = tokenTests.len - 1;
-    for (tokenTests) |tokenTest, i| {
+    for (tokenTests, 0..) |tokenTest, i| {
         if (i == MAX) {
             defer {
                 scanner.cursor = 0;
@@ -445,7 +445,7 @@ test "Scanner" {
 
             var flag = true;
             if (scanner.tokens.items.len == tokenTest.ttypes.len) {
-                for (scanner.tokens.items) |tok, j| {
+                for (scanner.tokens.items, 0..) |tok, j| {
                     if (tok.tok_type != tokenTest.ttypes[j]) {
                         std.debug.print(
                             "i: {d}, NOT EQUAL TokenType: {} == {}\n",
@@ -463,7 +463,7 @@ test "Scanner" {
             }
 
             if (scanner.tokens.items.len == tokenTest.lexemes.len) {
-                for (tokenTest.lexemes) |lexeme, j| {
+                for (tokenTest.lexemes, 0..) |lexeme, j| {
                     const _code = scanner.tokens.items[j].toString(a, code);
                     if (!std.mem.eql(u8, lexeme, _code)) {
                         std.debug.print("NOT EQUAL for {d}, {d}: {s} == {s}\n", .{ i, j, lexeme, _code });

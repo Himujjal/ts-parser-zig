@@ -1,5 +1,6 @@
 const std = @import("std");
-const expect = std.testing.expect;
+const testing = @import("testing");
+const expect = testing.expect;
 
 const utils = @import("utils.zig");
 const token = @import("token.zig");
@@ -73,7 +74,7 @@ fn isIdentifierContinue(byte: u21) bool {
 fn isIdentifierStartBytes(bytes: []const u8) bool {
     var r = std.unicode.Utf8View.init(bytes) catch return false;
     var iter = r.iterator();
-    var code_point = iter.nextCodepoint();
+    const code_point = iter.nextCodepoint();
     if (code_point) |b| {
         const _first = b == '$' or b == '\\' or b == '_';
         if (_first) return true;
@@ -119,7 +120,7 @@ fn isWhiteSpaceBytes(bytes: []const u8) bool {
 }
 
 inline fn rune(c: u8) u21 {
-    return @intCast(u21, c);
+    return @as(u21, @intCast(c));
 }
 
 pub const Scanner = struct {
@@ -192,10 +193,10 @@ pub const Scanner = struct {
 
     /// heart of the scanner. scans individual tokens
     fn scanToken(s: *Scanner) TokenType {
-        var prevLineTerminator = s.prevLineTerminator;
+        const prevLineTerminator = s.prevLineTerminator;
         s.prevLineTerminator = false;
 
-        var prevNumericLiteral = s.prevNumericLiteral;
+        const prevNumericLiteral = s.prevNumericLiteral;
         s.prevNumericLiteral = false;
 
         const c = s.current();
@@ -453,7 +454,7 @@ pub const Scanner = struct {
     }
 
     fn consumeNonHexEscape(s: *Scanner) bool {
-        var c = s.current();
+        const c = s.current();
         if (c == '\\' or s.lookAhead() != 'u') {
             if (s.cursor != s.code.len - 1) {
                 s.move(2);
@@ -534,7 +535,7 @@ pub const Scanner = struct {
     }
 
     fn consumeOperatorToken(s: *Scanner) TokenType {
-        var c = s.current();
+        const c = s.current();
         s.advance();
         if (c == '/' and s.current() == '=') {
             s.advance();
@@ -713,7 +714,7 @@ pub const Scanner = struct {
             return false;
         }
         s.advance();
-        var res = (switch (t) {
+        const res = (switch (t) {
             DigitType.Hex => s.consumeHexDigit(),
             DigitType.Binary => s.consumeBinaryDigit(),
             DigitType.Octal => s.consumeOctalDigit(),
@@ -856,7 +857,7 @@ pub const Scanner = struct {
         s.advance();
         var inClass = false;
         while (true) {
-            var c = s.current();
+            const c = s.current();
             if (!inClass and c == '/') {
                 s.advance();
                 break;
@@ -881,7 +882,7 @@ pub const Scanner = struct {
         }
         // flags
         while (true) {
-            var c = s.current();
+            const c = s.current();
             if (identifierTable[c]) {
                 s.advance();
             } else if (0xC0 <= c) {
@@ -899,16 +900,19 @@ pub const Scanner = struct {
     }
 
     fn consumeTemplateToken(s: *Scanner) TokenType {
-        var continuation = s.current() == '}';
+        const continuation = s.current() == '}';
         s.advance();
+
         while (true) {
             var c = s.current();
             if (c == '`') {
-                // TODO
+                // TODO: Implement Template Token
                 // s.templateLevels.items = s.templateLevels.items[0..(s.templateLevels.items.len - 1)];
-                const sl = s.templateLevels.toOwnedSlice();
-                // const len = sl.len;
-                s.templateLevels = ArrayList(usize).fromOwnedSlice(s.internal_allocator, sl[0..(sl.len - 1)]);
+                const sl: []usize = s.templateLevels.toOwnedSlice() catch {
+                    unreachable; // TODO: To be handled later
+                };
+                const sl2: []usize = sl[0..(sl.len - 1)];
+                s.templateLevels = ArrayList(usize).fromOwnedSlice(s.internal_allocator, sl2);
                 s.advance();
                 if (continuation) return .TemplateEndToken;
                 return .TemplateToken;
@@ -938,9 +942,9 @@ pub const Scanner = struct {
 
     fn processRawText(s: *Scanner, start: usize, end_p: usize) void {
         var old_code = s.code;
-        var old_cursor = s.cursor;
-        var old_start = s.start;
-        var old_raw_text_offset = s.raw_text_offset;
+        const old_cursor = s.cursor;
+        const old_start = s.start;
+        const old_raw_text_offset = s.raw_text_offset;
 
         s.raw_text_offset = s.raw_text_offset + s.start;
         s.start = 0;
@@ -1008,13 +1012,13 @@ pub const Scanner = struct {
     fn equalFold(s: *Scanner, str: []const u8, targetLower: []const u8) bool {
         const lxx = s.internal_allocator.alloc(u8, str.len) catch unreachable;
         std.mem.copy(u8, lxx, s);
-        for (lxx) |_, i| {
+        for (lxx, 0..) |_, i| {
             lxx[i] = std.ascii.toLower(s[i]);
         }
         if (lxx.len != targetLower.len) {
             return false;
         }
-        for (targetLower) |c, i| {
+        for (targetLower, 0..) |c, i| {
             const d = lxx[i];
             if (d != c and (d < 'A' or d > 'Z' or (d + ('a' - 'A')) != c)) {
                 s.internal_allocator.free(lxx);
@@ -1071,7 +1075,7 @@ pub const Scanner = struct {
             var i: i32 = 0;
             while (i < n) : (i += 1) p.advance();
         } else {
-            const newPos = @intCast(usize, @intCast(i32, p.cursor) + n);
+            const newPos: usize = @as(usize, @intCast(@as(i32, @intCast(p.cursor)) + n));
             p.cursor = newPos;
         }
     }

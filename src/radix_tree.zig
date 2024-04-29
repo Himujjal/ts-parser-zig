@@ -6,7 +6,6 @@
 /// copied from https://github.com/Luukdegram/ctradix/blob/master/src/main.zig
 const std = @import("std");
 const testing = std.testing;
-
 const TokenType = @import("token.zig").TokenType;
 
 pub fn RadixTree(
@@ -129,7 +128,7 @@ pub fn RadixTree(
                 if (current.edge(search[0])) |n| {
                     current = n;
                 } else {
-                    var leaf = Leaf{
+                    const leaf = Leaf{
                         .key = key,
                         .data = data,
                     };
@@ -174,7 +173,7 @@ pub fn RadixTree(
 
                 current.prefix = current.prefix[prefix..];
 
-                var leaf = Leaf{
+                const leaf = Leaf{
                     .key = key,
                     .data = data,
                 };
@@ -284,7 +283,7 @@ fn eql(
 ) bool {
     if (a.len != b.len) return false;
     if (a.ptr == b.ptr) return true;
-    for (a) |item, i| if (!cmp(item, b[i])) return false;
+    for (a, 0..) |item, i| if (!cmp(item, b[i])) return false;
     return true;
 }
 

@@ -137,7 +137,7 @@ pub const Renderer = struct {
 
     pub fn renderArrExpr(r: *Renderer, ae: *ArrayExpr) Err![]const u8 {
         var res: []const u8 = "[";
-        for (ae.elements) |element, i| {
+        for (ae.elements, 0..) |element, i| {
             if (element) |e| {
                 res = try r.concat(res, try r.renderArrayExprElement(e));
             }
@@ -185,7 +185,7 @@ pub const Renderer = struct {
             => {},
             TT.BinaryToken, TT.BigIntToken => {},
             TT.OctalToken => {
-                var res: u32 = std.fmt.parseInt(u32, value, 0) catch |e| {
+                const res: u32 = std.fmt.parseInt(u32, value, 0) catch |e| {
                     std.debug.print("ERROR: {}\n", .{e});
                     return "0";
                 };
@@ -196,7 +196,7 @@ pub const Renderer = struct {
                 if (value[0] == '0') {
                     while (value[first_index] == '0') : (first_index += 1) {}
                 }
-                var res: f64 = std.fmt.parseFloat(f64, value[first_index..value.len]) catch |e| {
+                const res: f64 = std.fmt.parseFloat(f64, value[first_index..value.len]) catch |e| {
                     std.debug.print("ERROR: {}\n", .{e});
                     return "0";
                 };
@@ -209,7 +209,7 @@ pub const Renderer = struct {
 
     pub fn renderSeqExpr(r: *Renderer, seq_expr: *SeqExpr) Err![]const u8 {
         var res: []const u8 = "";
-        for (seq_expr.exprs) |expr, i| {
+        for (seq_expr.exprs, 0..) |expr, i| {
             if (expr) |e| {
                 res = try r.concat(res, try r.renderExpr(e));
                 if (i != seq_expr.exprs.len - 1) res = try r.concat(res, ",");

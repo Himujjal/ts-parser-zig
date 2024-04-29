@@ -1,13 +1,16 @@
 const std = @import("std");
-const TokenType = @import("token.zig").TokenType;
+const token = @import("token.zig");
+const TokenType = token.TokenType;
 const radix_tree = @import("radix_tree.zig");
 
 const StringRadixTree = radix_tree.StringRadixTree;
 
+const copy = std.mem.copyForwards;
+
 pub fn concatStrings(allocator: std.mem.Allocator, string_1: []const u8, string_2: []const u8) std.mem.Allocator.Error![]const u8 {
     const result = try allocator.alloc(u8, string_1.len + string_2.len);
-    std.mem.copy(u8, result, string_1);
-    std.mem.copy(u8, result[string_1.len..], string_2);
+    copy(u8, result, string_1);
+    copy(u8, result[string_1.len..], string_2);
     return result;
 }
 
@@ -17,7 +20,7 @@ pub fn convertHexTou21(str: []const u8) u21 {
 
 pub fn concatCharToStr(allocator: std.mem.Allocator, string_1: []const u8, c: u8) std.mem.Allocator.Error![]const u8 {
     const result = try allocator.alloc(u8, string_1.len + 1);
-    std.mem.copy(u8, result, string_1);
+    copy(u8, result, string_1);
     result[string_1.len] = c;
     return result;
 }
@@ -27,7 +30,7 @@ pub fn renderStringDecodedUnicode(allocator: std.mem.Allocator, string: []const 
 
     var len: usize = 0;
     var i: usize = 0;
-    while (i < string.len)  {
+    while (i < string.len) {
         var c = string[i];
         if (c == '\\') {
             i += 1;
@@ -35,10 +38,10 @@ pub fn renderStringDecodedUnicode(allocator: std.mem.Allocator, string: []const 
             if (c == 'u' and string[i + 1] != '{') {
                 i += 1;
                 const unicode_based_string = try encodeUnicodeToStr(allocator, string[i .. i + 4]);
-                std.mem.copy(u8, new_tok_str[len .. len + unicode_based_string.len], unicode_based_string);
-				i += 4;
-				len += unicode_based_string.len;
-				continue;
+                copy(u8, new_tok_str[len .. len + unicode_based_string.len], unicode_based_string);
+                i += 4;
+                len += unicode_based_string.len;
+                continue;
             } else {
                 new_tok_str[len] = '\\';
                 new_tok_str[len + 1] = c;
@@ -48,7 +51,7 @@ pub fn renderStringDecodedUnicode(allocator: std.mem.Allocator, string: []const 
             new_tok_str[len] = c;
             len += 1;
         }
-		i += 1;
+        i += 1;
     }
     return new_tok_str[0..len];
 }
@@ -63,8 +66,8 @@ pub fn encodeUnicodeToStr(allocator: std.mem.Allocator, unicode: []const u8) std
 pub fn concatUnicodeToStr(allocator: std.mem.Allocator, string_1: []const u8, unicode: []const u8) std.mem.Allocator.Error![]const u8 {
     const string_2 = try encodeUnicodeToStr(allocator, unicode);
     const result = try allocator.alloc(u8, string_1.len + string_2.len);
-    std.mem.copy(u8, result, string_1);
-    std.mem.copy(u8, result[string_1.len..], string_2);
+    copy(u8, result, string_1);
+    copy(u8, result[string_1.len..], string_2);
     return result;
 }
 

@@ -1,4 +1,6 @@
 zig-cache
 zig-out
 TypeScript
-.DS_Store
+
+**/.DS_Store
+

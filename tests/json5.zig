@@ -87,7 +87,7 @@ pub const Token = union(enum) {
         pub fn decodedLength(self: @This()) usize {
             return self.count +% switch (self.escapes) {
                 .None => 0,
-                .Some => |s| @bitCast(usize, s.size_diff),
+                .Some => |s| @as(usize, @bitCast(s.size_diff)),
             };
         }
 
@@ -143,9 +143,9 @@ fn AggregateContainerStack(comptime n: usize) type {
             }
 
             const index = self.len / element_bitcount;
-            const sub_index = @intCast(ElementShiftAmountType, self.len % element_bitcount);
+            const sub_index = @as(ElementShiftAmountType, @intCast(self.len % element_bitcount));
             const clear_mask = ~(@as(ElementType, 1) << sub_index);
-            const set_bits = @as(ElementType, @enumToInt(ty)) << sub_index;
+            const set_bits = @as(ElementType, @intFromEnum(ty)) << sub_index;
 
             self.memory[index] &= clear_mask;
             self.memory[index] |= set_bits;
@@ -159,9 +159,10 @@ fn AggregateContainerStack(comptime n: usize) type {
 
             const bit_to_extract = self.len - 1;
             const index = bit_to_extract / element_bitcount;
-            const sub_index = @intCast(ElementShiftAmountType, bit_to_extract % element_bitcount);
-            const bit = @intCast(u1, (self.memory[index] >> sub_index) & 1);
-            return @intToEnum(AggregateContainerType, bit);
+            const sub_index: ElementShiftAmountType = @intCast(bit_to_extract % element_bitcount);
+            const bit: u1 = @intCast((self.memory[index] >> sub_index) & 1);
+            const res: AggregateContainerType = @enumFromInt(bit);
+            return res;
         }
 
         pub fn pop(self: *Self) ?AggregateContainerType {
@@ -289,11 +290,12 @@ pub const StreamingParser = struct {
         // processing a complete value type.
         pub fn fromAggregateContainerType(ty: AggregateContainerType) State {
             comptime {
-                std.debug.assert(@enumToInt(AggregateContainerType.object) == @enumToInt(State.ObjectSeparator));
-                std.debug.assert(@enumToInt(AggregateContainerType.array) == @enumToInt(State.ValueEnd));
+                std.debug.assert(@intFromEnum(AggregateContainerType.object) == @intFromEnum(State.ObjectSeparator));
+                std.debug.assert(@intFromEnum(AggregateContainerType.array) == @intFromEnum(State.ValueEnd));
             }
 
-            return @intToEnum(State, @enumToInt(ty));
+            const res: State = @enumFromInt(@intFromEnum(ty));
+            return res;
         }
     };
 
@@ -1418,7 +1420,7 @@ fn parsedEqual(a: anytype, b: @TypeOf(a)) bool {
             }
         },
         .Array => {
-            for (a) |e, i|
+            for (a, 0..) |e, i|
                 if (!parsedEqual(e, b[i])) return false;
             return true;
         },
@@ -1432,7 +1434,7 @@ fn parsedEqual(a: anytype, b: @TypeOf(a)) bool {
             .One => return parsedEqual(a.*, b.*),
             .Slice => {
                 if (a.len != b.len) return false;
-                for (a) |e, i|
+                for (a, 0..) |e, i|
                     if (!parsedEqual(e, b[i])) return false;
                 return true;
             },
@@ -1528,7 +1530,7 @@ fn ParseInternalErrorImpl(comptime T: type, comptime inferred_types: []const typ
                 ParseInternalErrorImpl(arrayInfo.child, inferred_types ++ [_]type{T});
         },
         .Pointer => |ptrInfo| {
-            var errors = error{AllocatorRequired} || std.mem.Allocator.Error;
+            const errors = error{AllocatorRequired} || std.mem.Allocator.Error;
             switch (ptrInfo.size) {
                 .One => {
                     return errors || ParseInternalErrorImpl(ptrInfo.child, inferred_types ++ [_]type{T});
@@ -1575,7 +1577,7 @@ fn parseInternal(
                     const float = try std.fmt.parseFloat(f128, numberToken.slice(tokens.slice, tokens.i - 1));
                     if (@round(float) != float) return error.InvalidNumber;
                     if (float > std.math.maxInt(T) or float < std.math.minInt(T)) return error.Overflow;
-                    return @floatToInt(T, float);
+                    return @as(T, @intFromFloat(float));
                 },
                 .String => |stringToken| {
                     return std.fmt.parseInt(T, stringToken.slice(tokens.slice, tokens.i - 1), 10) catch |err| {
@@ -1585,7 +1587,7 @@ fn parseInternal(
                                 const float = try std.fmt.parseFloat(f128, stringToken.slice(tokens.slice, tokens.i - 1));
                                 if (@round(float) != float) return error.InvalidNumber;
                                 if (float > std.math.maxInt(T) or float < std.math.minInt(T)) return error.Overflow;
-                                return @floatToInt(T, float);
+                                return @as(T, @intFromFloat(float));
                             },
                         }
                     };
@@ -1656,7 +1658,7 @@ fn parseInternal(
             var r: T = undefined;
             var fields_seen = [_]bool{false} ** structInfo.fields.len;
             errdefer {
-                inline for (structInfo.fields) |field, i| {
+                inline for (structInfo.fields, 0..) |field, i| {
                     if (fields_seen[i] and !field.is_comptime) {
                         parseFree(field.field_type, @field(r, field.name), options);
                     }
@@ -1671,7 +1673,7 @@ fn parseInternal(
                         var child_options = options;
                         child_options.allow_trailing_data = true;
                         var found = false;
-                        inline for (structInfo.fields) |field, i| {
+                        inline for (structInfo.fields, 0..) |field, i| {
                             // TODO: using switches here segfault the compiler (#2727?)
                             if ((stringToken.escapes == .None and mem.eql(u8, field.name, key_source_slice)) or (stringToken.escapes == .Some and (field.name.len == stringToken.decodedLength() and encodesTo(field.name, key_source_slice)))) {
                                 // if (switch (stringToken.escapes) {
@@ -1699,7 +1701,8 @@ fn parseInternal(
                                     }
                                 }
                                 if (field.is_comptime) {
-                                    if (!try parsesTo(field.field_type, @ptrCast(*align(1) const field.field_type, field.default_value.?).*, tokens, child_options)) {
+                                    // const newPtr : *align(1) const field.field_type = @ptrCast(field.default_value.?).*;
+                                    if (!try parsesTo(field.field_type, field.default_value.?.*, tokens, child_options)) {
                                         return error.UnexpectedValue;
                                     }
                                 } else {
@@ -1722,12 +1725,13 @@ fn parseInternal(
                     else => return error.UnexpectedToken,
                 }
             }
-            inline for (structInfo.fields) |field, i| {
+
+            inline for (structInfo.fields, 0..) |field, i| {
                 if (!fields_seen[i]) {
                     if (field.default_value) |default_ptr| {
                         if (!field.is_comptime) {
-                            const default = @ptrCast(*align(1) const field.field_type, default_ptr).*;
-                            @field(r, field.name) = default;
+                            // const default = @ptrCast(*align(1) const field.field_type, default_ptr).*;
+                            @field(r, field.name) = default_ptr.*;
                         }
                     } else {
                         return error.MissingField;
@@ -1806,7 +1810,8 @@ fn parseInternal(
                             }
 
                             if (ptrInfo.sentinel) |some| {
-                                const sentinel_value = @ptrCast(*align(1) const ptrInfo.child, some).*;
+                                const sentinel_value = some.*;
+                                // const sentinel_value = @ptrCast(*align(1) const ptrInfo.child, some).*;
                                 try arraylist.append(sentinel_value);
                                 const output = arraylist.toOwnedSlice();
                                 return output[0 .. output.len - 1 :sentinel_value];
@@ -1818,7 +1823,7 @@ fn parseInternal(
                             if (ptrInfo.child != u8) return error.UnexpectedToken;
                             const source_slice = stringToken.slice(tokens.slice, tokens.i - 1);
                             const len = stringToken.decodedLength();
-                            const output = try allocator.alloc(u8, len + @boolToInt(ptrInfo.sentinel != null));
+                            const output = try allocator.alloc(u8, len + @intFromBool(ptrInfo.sentinel != null));
                             errdefer allocator.free(output);
                             switch (stringToken.escapes) {
                                 .None => mem.copy(u8, output, source_slice),
@@ -1826,7 +1831,8 @@ fn parseInternal(
                             }
 
                             if (ptrInfo.sentinel) |some| {
-                                const char = @ptrCast(*const u8, some).*;
+                                // const char = @ptrCast(*const u8, some).*;
+                                const char: u8 = some.*;
                                 output[len] = char;
                                 return output[0..len :char];
                             }
@@ -1991,7 +1997,7 @@ pub const Parser = struct {
             },
             .ObjectValue => {
                 var object = &p.stack.items[p.stack.items.len - 2].Object;
-                var key = p.stack.items[p.stack.items.len - 1].String;
+                const key = p.stack.items[p.stack.items.len - 1].String;
 
                 switch (token) {
                     .ObjectBegin => {
@@ -2295,8 +2301,8 @@ fn outputUnicodeEscape(
         assert(codepoint <= 0x10FFFF);
         // To escape an extended character that is not in the Basic Multilingual Plane,
         // the character is represented as a 12-character sequence, encoding the UTF-16 surrogate pair.
-        const high = @intCast(u16, (codepoint - 0x10000) >> 10) + 0xD800;
-        const low = @intCast(u16, codepoint & 0x3FF) + 0xDC00;
+        const high = @as(u16, @intCast((codepoint - 0x10000) >> 10)) + 0xD800;
+        const low = @as(u16, @intCast(codepoint & 0x3FF)) + 0xDC00;
         try out_stream.writeAll("\\u");
         try std.fmt.formatIntValue(high, "x", std.fmt.FormatOptions{ .width = 4, .fill = '0' }, out_stream);
         try out_stream.writeAll("\\u");
@@ -2361,7 +2367,7 @@ pub fn stringify(
     const T = @TypeOf(value);
     switch (@typeInfo(T)) {
         .Float, .ComptimeFloat => {
-            return std.fmt.formatFloatScientific(value, std.fmt.FormatOptions{}, out_stream);
+            return std.fmt.formatFloatHexadecimal(value, std.fmt.FormatOptions{}, out_stream);
         },
         .Int, .ComptimeInt => {
             return std.fmt.formatIntValue(value, "", std.fmt.FormatOptions{}, out_stream);
@@ -2380,14 +2386,14 @@ pub fn stringify(
             }
         },
         .Enum => {
-            if (comptime std.meta.trait.hasFn("json5Stringify")(T)) {
+            if (comptime std.meta.hasFn(T, "json5Stringify")) {
                 return value.json5Stringify(options, out_stream);
             }
 
             @compileError("Unable to stringify enum '" ++ @typeName(T) ++ "'");
         },
         .Union => {
-            if (comptime std.meta.trait.hasFn("json5Stringify")(T)) {
+            if (comptime std.meta.hasFn(T, "json5Stringify")) {
                 return value.json5Stringify(options, out_stream);
             }
 
@@ -2403,7 +2409,7 @@ pub fn stringify(
             }
         },
         .Struct => |S| {
-            if (comptime std.meta.trait.hasFn("json5Stringify")(T)) {
+            if (comptime std.meta.hasFn(T, "json5Stringify")) {
                 return value.json5Stringify(options, out_stream);
             }
 
@@ -2479,7 +2485,7 @@ pub fn stringify(
                 if (child_options.whitespace) |*whitespace| {
                     whitespace.indent_level += 1;
                 }
-                for (value) |x, i| {
+                for (value, 0..) |x, i| {
                     if (i != 0) {
                         try out_stream.writeByte(',');
                     }
@@ -2687,8 +2693,8 @@ pub fn WriteStream(comptime OutStream: type, comptime max_depth: usize) type {
                 .ComptimeInt => {
                     return self.emitNumber(@as(std.math.IntFittingRange(value, value), value));
                 },
-                .Float, .ComptimeFloat => if (@floatCast(f64, value) == value) {
-                    try self.stream.print("{}", .{@floatCast(f64, value)});
+                .Float, .ComptimeFloat => if (@as(f64, @floatCast(value)) == value) {
+                    try self.stream.print("{}", .{@as(f64, @floatCast(value))});
                     self.popState();
                     return;
                 },
@@ -2783,7 +2789,7 @@ fn jsonValueEqual(allocator: Allocator, a: Value, b: Value) !bool {
         .Array => |a_a| switch (b) {
             .Array => |b_a| {
                 if (a_a.items.len != b_a.items.len) return false;
-                for (a_a.items) |a_item, i| {
+                for (a_a.items, 0..) |a_item, i| {
                     const b_item = b_a.items[i];
                     if (!(try jsonValueEqual(allocator, a_item, b_item))) return false;
                 }
@@ -2820,7 +2826,7 @@ fn jsonValueEqual(allocator: Allocator, a: Value, b: Value) !bool {
 
 pub fn json5Equal(allocator: Allocator, a: Value, b: Value) !bool {
     var arena = std.heap.ArenaAllocator.init(allocator);
-    var val = try jsonValueEqual(arena.allocator(), a, b);
+    const val = try jsonValueEqual(arena.allocator(), a, b);
     arena.deinit();
     return val;
 }
@@ -2834,7 +2840,7 @@ pub fn writeStream(
 
 fn getJsonObject(allocator: std.mem.Allocator) !std.json.Value {
     var value = std.json.Value{ .Object = std.json.ObjectMap.init(allocator) };
-    try value.Object.put("one", std.json.Value{ .Integer = @intCast(i64, 1) });
+    try value.Object.put("one", std.json.Value{ .Integer = @as(i64, @intCast(1)) });
     try value.Object.put("two", std.json.Value{ .Float = 2.0 });
     return value;
 }
